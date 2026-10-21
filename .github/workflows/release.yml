@@ -1,0 +1,208 @@
+name: Release
+
+on:
+  push:
+    branches: [master]
+  workflow_dispatch:
+    inputs:
+      make_release:
+        description: "Create a GitHub Release"
+        type: boolean
+        default: true
+      sign:
+        description: "Sign artifacts with SignPath (after approval)"
+        type: boolean
+        default: false
+
+permissions:
+  contents: write
+  actions: read
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  build:
+    name: Build Windows artifacts
+    runs-on: windows-latest
+    timeout-minutes: 45
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+      tag: ${{ steps.version.outputs.tag }}
+      should_release: ${{ steps.tagcheck.outputs.should_release }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+
+      - name: Cache Rust
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+
+      - name: Install frontend dependencies
+        run: npm ci
+
+      - name: Check version consistency
+        shell: pwsh
+        run: ./scripts/check-version.ps1
+
+      - name: Lint frontend
+        run: npm run lint
+
+      - name: Check frontend formatting
+        run: npm run format:check
+
+      - name: Frontend tests (Vitest)
+        run: npm run test
+
+      - name: Check Rust formatting
+        working-directory: src-tauri
+        run: cargo fmt --all -- --check
+
+      - name: Clippy
+        working-directory: src-tauri
+        run: cargo clippy --all-targets -- -D warnings
+
+      - name: Rust tests
+        working-directory: src-tauri
+        run: cargo test
+
+      - name: Read version
+        id: version
+        shell: pwsh
+        run: |
+          $version = (Get-Content package.json -Raw | ConvertFrom-Json).version
+          Add-Content $env:GITHUB_OUTPUT "version=$version"
+          Add-Content $env:GITHUB_OUTPUT "tag=v$version"
+
+      - name: Check whether the tag already exists
+        id: tagcheck
+        shell: pwsh
+        run: |
+          $tag = "${{ steps.version.outputs.tag }}"
+          git fetch --tags --force
+          $existing = git tag --list $tag
+          if ($existing) {
+            Add-Content $env:GITHUB_OUTPUT "should_release=false"
+            Write-Host "Tag $tag already exists; release creation is skipped."
+          } else {
+            Add-Content $env:GITHUB_OUTPUT "should_release=true"
+          }
+
+      - name: Build Tauri app (portable exe + NSIS)
+        run: npm run tauri build
+
+      - name: Collect release artifacts
+        shell: pwsh
+        run: |
+          $version = "${{ steps.version.outputs.version }}"
+          # `dist` is Vite's frontend output. Never stage release files there:
+          # that is how index.html/icon.png leaked into v1.1.1.
+          $stage = "release-artifacts"
+          New-Item -ItemType Directory -Force $stage | Out-Null
+
+          Copy-Item "src-tauri/target/release/zapret-ui.exe" "$stage/zapret-ui.exe"
+
+          # README/LICENSE/notices go into the portable zip, not into the release root.
+          Compress-Archive -Path @(
+            "$stage/zapret-ui.exe",
+            "README.md",
+            "LICENSE",
+            "THIRD_PARTY_NOTICES.md"
+          ) -DestinationPath "$stage/zapret-ui_${version}_x64_portable.zip" -Force
+
+          $setup = Get-ChildItem "src-tauri/target/release/bundle/nsis/*-setup.exe" | Select-Object -First 1
+          if (-not $setup) { throw "NSIS installer was not produced" }
+          Copy-Item $setup.FullName "$stage/zapret-ui_${version}_x64-setup.exe"
+
+          $hashes = Get-FileHash @(
+            "$stage/zapret-ui.exe",
+            "$stage/zapret-ui_${version}_x64_portable.zip",
+            "$stage/zapret-ui_${version}_x64-setup.exe"
+          ) -Algorithm SHA256
+          $hashes | ForEach-Object {
+            "$($_.Hash.ToLower())  $([IO.Path]::GetFileName($_.Path))"
+          } | Set-Content "$stage/SHA256SUMS.txt"
+
+          Get-ChildItem $stage | Format-Table Name, Length
+
+      # SignPath is added after the OSS application is approved (see TODO.md).
+      # The intended order is: build unsigned -> SignPath -> replace release files
+      # with signed ones -> publish. While it is not configured, releases are
+      # unsigned and the app updater still verifies SHA-256 asset digests.
+      #
+      # - name: Sign with SignPath
+      #   uses: signpath/github-action-submit-signing-request@v3
+      #   with:
+      #     api-token: ${{ secrets.SIGNPATH_API_TOKEN }}
+      #     organization-id: ${{ vars.SIGNPATH_ORGANIZATION_ID }}
+      #     project-slug: zapret-ui
+      #     signing-policy-slug: release-signing
+      #     artifact-configuration-slug: initial
+      #     github-artifact-id: ${{ steps.upload-unsigned.outputs.artifact-id }}
+      #     wait-for-completion: true
+      #     output-artifact-directory: signed
+
+      - name: Upload build artifacts
+        uses: actions/upload-artifact@v7
+        with:
+          name: release-artifacts
+          path: release-artifacts/*
+          if-no-files-found: error
+
+  publish:
+    name: Publish GitHub Release
+    needs: build
+    # While the repository is private, a push only builds artifacts. A manual
+    # run with make_release=true can publish a private test release.
+    if: >-
+      ${{
+        needs.build.outputs.should_release == 'true' &&
+        (
+          (github.event_name == 'push' && github.event.repository.private == false) ||
+          (github.event_name == 'workflow_dispatch' && inputs.make_release)
+        )
+      }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Checkout (for CHANGELOG.md)
+        uses: actions/checkout@v7
+
+      - name: Download artifacts
+        uses: actions/download-artifact@v8
+        with:
+          name: release-artifacts
+          path: release-artifacts
+
+      - name: Extract release notes
+        shell: pwsh
+        run: ./scripts/release-notes.ps1 -Version "${{ needs.build.outputs.version }}" -Output release-notes.md
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v3
+        with:
+          tag_name: ${{ needs.build.outputs.tag }}
+          name: zapret-ui ${{ needs.build.outputs.version }}
+          body_path: release-notes.md
+          files: release-artifacts/*
+          draft: false
+          prerelease: false
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
