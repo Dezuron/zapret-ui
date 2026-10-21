@@ -144,22 +144,44 @@ fn ensure_elevated() {
     }
 }
 
-/// Ask DWM for a dark native title bar. `theme: "Dark"` in tauri.conf.json sets
-/// the webview theme, but the non-client caption is drawn by Windows and needs
-/// this explicit attribute on Windows 11.
-fn apply_dark_titlebar(window: &tauri::WebviewWindow) {
+/// Ask DWM for a dark or light native title bar. The non-client caption is
+/// drawn by Windows; the app theme only changes the webview unless this
+/// attribute is kept in sync.
+pub fn apply_titlebar_theme(window: &tauri::WebviewWindow, dark: bool) {
     use windows_sys::Win32::Graphics::Dwm::{DwmSetWindowAttribute, DWMWA_USE_IMMERSIVE_DARK_MODE};
+
+    let _ = window.set_theme(Some(if dark {
+        tauri::Theme::Dark
+    } else {
+        tauri::Theme::Light
+    }));
 
     let Ok(hwnd) = window.hwnd() else {
         return;
     };
-    let enabled: i32 = 1;
+    let enabled: i32 = if dark { 1 } else { 0 };
+    let caption: u32 = if dark { 0x000d0909 } else { 0x00f4f0ee };
+    let caption_text: u32 = if dark { 0x00f6f3f2 } else { 0x00221917 };
     unsafe {
         DwmSetWindowAttribute(
             hwnd.0,
             DWMWA_USE_IMMERSIVE_DARK_MODE as u32,
             &enabled as *const _ as *const core::ffi::c_void,
             std::mem::size_of::<i32>() as u32,
+        );
+        // Windows 11: also paint the native caption explicitly, otherwise a
+        // system dark theme can keep a dark title bar over a light app.
+        DwmSetWindowAttribute(
+            hwnd.0,
+            35_u32,
+            &caption as *const _ as *const core::ffi::c_void,
+            std::mem::size_of::<u32>() as u32,
+        );
+        DwmSetWindowAttribute(
+            hwnd.0,
+            36_u32,
+            &caption_text as *const _ as *const core::ffi::c_void,
+            std::mem::size_of::<u32>() as u32,
         );
     }
 }
@@ -271,6 +293,7 @@ fn show_main_window(app: &tauri::AppHandle) {
     if let Some(window) = app.get_webview_window("main") {
         ensure_on_screen(&window);
         let _ = window.show();
+        apply_titlebar_theme(&window, config::load_config().theme != "light");
         let _ = window.set_focus();
     }
 }
@@ -305,6 +328,7 @@ pub fn run() {
             commands::set_autostart,
             commands::set_check_updates,
             commands::set_check_app_updates,
+            commands::set_theme,
             commands::set_runtime_path,
             commands::set_flashscore_bypass,
             commands::set_bench_auto_apply,
@@ -369,7 +393,8 @@ pub fn run() {
 
             // Hide window on close (minimize to tray) instead of exiting
             if let Some(w) = app.get_webview_window("main") {
-                apply_dark_titlebar(&w);
+                let dark = config::load_config().theme != "light";
+                apply_titlebar_theme(&w, dark);
                 let window = w.clone();
                 w.on_window_event(move |event| {
                     if let tauri::WindowEvent::CloseRequested { api, .. } = event {

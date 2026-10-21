@@ -7,7 +7,7 @@ import ZapretPage from "../pages/ZapretPage.vue";
 const router = createRouter({
   history: createWebHashHistory(),
   routes: [
-    { path: "/", name: "overview", component: OverviewPage, meta: { title: "Обзор" } },
+    { path: "/", name: "overview", component: OverviewPage, meta: { title: "Главная" } },
     { path: "/zapret", name: "zapret", component: ZapretPage, meta: { title: "Zapret" } },
     { path: "/telegram", name: "telegram", component: TelegramPage, meta: { title: "Telegram" } },
     { path: "/settings", name: "settings", component: SettingsPage, meta: { title: "Настройки" } },

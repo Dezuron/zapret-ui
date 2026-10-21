@@ -1,7 +1,7 @@
 # zapret-ui
 
 <p align="center">
-  <img src="https://img.shields.io/badge/version-1.0.0-303036?style=flat-square" alt="Версия 1.0.0" />
+  <img src="https://img.shields.io/badge/version-1.1.0-303036?style=flat-square" alt="Версия 1.1.0" />
   <img src="https://img.shields.io/badge/Windows-11%20x64-303036?style=flat-square" alt="Windows 11 x64" />
   <img src="https://img.shields.io/badge/language-RU-303036?style=flat-square" alt="Русский язык" />
   <img src="https://img.shields.io/badge/license-MIT-303036?style=flat-square" alt="MIT" />

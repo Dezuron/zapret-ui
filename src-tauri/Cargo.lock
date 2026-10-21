@@ -5231,7 +5231,7 @@ dependencies = [
 
 [[package]]
 name = "zapret-ui"
-version = "1.0.0"
+version = "1.1.0"
 dependencies = [
  "dirs 5.0.1",
  "reqwest 0.12.28",

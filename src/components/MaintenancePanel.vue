@@ -23,6 +23,7 @@ import {
   setAutoApply,
   setCheckAppUpdates,
   setGameFilter,
+  setTheme,
   status,
   toggleAutostart,
   toggleCheckUpdates,
@@ -30,6 +31,12 @@ import {
   updateInfo,
   updateProgress,
 } from "../store";
+
+const themes = [
+  { value: "dark" as const, label: "Тёмная" },
+  { value: "gray" as const, label: "Серая" },
+  { value: "light" as const, label: "Светлая" },
+];
 </script>
 
 <template>
@@ -108,6 +115,23 @@ import {
 
     <section class="section">
       <h3>Настройки</h3>
+
+      <div class="theme-field">
+        <span class="field-label">Тема оформления</span>
+        <div class="theme-picker">
+          <button
+            v-for="theme in themes"
+            :key="theme.value"
+            class="theme-option"
+            :class="{ active: (config?.theme || 'dark') === theme.value }"
+            type="button"
+            @click="setTheme(theme.value)"
+          >
+            <span class="theme-preview" :data-theme-preview="theme.value" aria-hidden="true"></span>
+            <span>{{ theme.label }}</span>
+          </button>
+        </div>
+      </div>
 
       <Toggle
         label="Запуск при старте Windows"

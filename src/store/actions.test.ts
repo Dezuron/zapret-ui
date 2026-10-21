@@ -36,6 +36,7 @@ const configFixture: ConfigView = {
   game_filter: "disabled",
   runtime_version: "1.10.4",
   runtime_path: "C:\\old\\path",
+  theme: "dark",
   bench_budget: 100,
   bench_auto_apply: true,
 };

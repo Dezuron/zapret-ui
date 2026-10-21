@@ -7,15 +7,16 @@ import {
   PanelLeftOpen,
   Send,
   Settings2,
-  Zap,
+  ShieldCheck,
 } from "lucide-vue-next";
+import dyIcon from "../assets/dy.png";
 import { appVersion } from "../store";
 
 const collapsed = ref(false);
 
 const items = [
-  { to: "/", label: "Обзор", icon: LayoutDashboard },
-  { to: "/zapret", label: "Zapret", icon: Zap },
+  { to: "/", label: "Главная", icon: LayoutDashboard },
+  { to: "/zapret", label: "Zapret", icon: ShieldCheck },
   { to: "/telegram", label: "Telegram", icon: Send, soon: true },
   { to: "/settings", label: "Настройки", icon: Settings2 },
 ];
@@ -24,10 +25,9 @@ const items = [
 <template>
   <aside class="sidebar" :class="{ collapsed }" aria-label="Основная навигация">
     <div class="sidebar-brand">
-      <span class="brand-mark" aria-hidden="true"><Zap :size="18" :stroke-width="2.2" /></span>
+      <img class="brand-icon" :src="dyIcon" alt="" aria-hidden="true" />
       <div v-if="!collapsed" class="brand-text">
         <strong>zapret-ui</strong>
-        <span>flowseal-zapret</span>
       </div>
     </div>
 

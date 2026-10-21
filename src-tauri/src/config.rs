@@ -62,6 +62,8 @@ pub struct AppConfig {
     /// Custom folder for the zapret runtime. Empty means `%LOCALAPPDATA%\zapret-ui\runtime`.
     pub runtime_path: String,
     pub last_run_version: String,
+    /// UI theme: dark, gray or light.
+    pub theme: String,
 }
 
 impl Default for AppConfig {
@@ -79,6 +81,7 @@ impl Default for AppConfig {
             check_app_updates: true,
             runtime_path: String::new(),
             last_run_version: String::new(),
+            theme: "dark".into(),
         }
     }
 }

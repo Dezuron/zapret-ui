@@ -1,22 +1,40 @@
 <script setup lang="ts">
 import { computed } from "vue";
 import { useRouter } from "vue-router";
-import { ArrowUpRight, FolderOpen, Gauge, RefreshCw, ShieldCheck } from "lucide-vue-next";
-import StatusPanel from "../components/StatusPanel.vue";
+import { ArrowUpRight, RefreshCw, Send, ShieldCheck } from "lucide-vue-next";
+import Button from "../components/ui/button/Button.vue";
+import Card from "../components/ui/card/Card.vue";
+import CardContent from "../components/ui/card/CardContent.vue";
+import CardDescription from "../components/ui/card/CardDescription.vue";
+import CardHeader from "../components/ui/card/CardHeader.vue";
+import CardTitle from "../components/ui/card/CardTitle.vue";
+import Switch from "../components/ui/switch/Switch.vue";
 import {
   appUpdate,
   appVersion,
+  applyAppUpdate,
+  applyUpdate,
   benchDate,
-  benchHostCount,
   benchSummary,
+  benchRunning,
+  busy,
   checkAppUpdate,
   checkUpdate,
-  openFolder,
+  checkingAppUpdate,
+  checkingUpdate,
+  running,
+  runtimeReady,
   status,
+  toggleStart,
   updateInfo,
 } from "../store";
 
 const router = useRouter();
+
+const zapretState = computed(() => {
+  if (!runtimeReady.value) return "Не установлен";
+  return running.value ? "Обход включён" : "Обход выключен";
+});
 
 const bestScore = computed(() => {
   const best = benchSummary.value?.best;
@@ -24,106 +42,182 @@ const bestScore = computed(() => {
   return benchSummary.value?.results.find((result) => result.name === best)?.score ?? null;
 });
 
-const updateCount = computed(
-  () => (appUpdate.value?.available ? 1 : 0) + (updateInfo.value?.update_available ? 1 : 0),
-);
+const appHasUpdate = computed(() => !!appUpdate.value?.available);
+const zapretHasUpdate = computed(() => !!updateInfo.value?.update_available);
+const checkingAllUpdates = computed(() => checkingAppUpdate.value || checkingUpdate.value);
+
+async function checkAllUpdates() {
+  if (checkingAllUpdates.value || benchRunning.value) return;
+  await Promise.all([checkAppUpdate(false), checkUpdate(false)]);
+}
 </script>
 
 <template>
-  <div class="page-stack">
-    <div class="overview-grid">
-      <StatusPanel />
-
-      <section class="glass-card overview-card">
-        <div class="card-head">
-          <div>
-            <span class="eyebrow">Состояние</span>
-            <h2>Обновления</h2>
+  <div class="main-page">
+    <div class="power-grid">
+      <Card class="power-card">
+        <CardHeader class="power-head">
+          <div class="power-icon zapret"><ShieldCheck :size="20" /></div>
+          <div class="power-heading">
+            <CardTitle>Zapret</CardTitle>
+            <CardDescription>{{ zapretState }}</CardDescription>
           </div>
-          <span class="card-icon"><RefreshCw :size="17" /></span>
-        </div>
+          <Switch
+            :model-value="running"
+            :disabled="busy || benchRunning || !runtimeReady"
+            aria-label="Включить или выключить обход Zapret"
+            @update:model-value="toggleStart"
+          />
+        </CardHeader>
+        <CardContent class="power-content">
+          <div class="power-meta">
+            <span>Стратегия</span>
+            <strong>{{ status?.current_strategy || "не выбрана" }}</strong>
+          </div>
+          <div class="power-meta">
+            <span>Версия</span>
+            <strong>{{ status?.installed_version || "не установлена" }}</strong>
+          </div>
+          <Button
+            v-if="!runtimeReady"
+            class="power-action"
+            variant="secondary"
+            size="sm"
+            @click="router.push('/settings')"
+          >
+            Настроить Zapret
+          </Button>
+          <Button
+            v-else
+            class="power-action"
+            variant="outline"
+            size="sm"
+            @click="router.push('/zapret')"
+          >
+            Стратегии и проверка
+            <ArrowUpRight :size="13" />
+          </Button>
+        </CardContent>
+      </Card>
 
-        <div class="overview-row">
-          <span>Приложение</span>
-          <strong>{{ appVersion || "—" }}</strong>
-        </div>
-        <div class="overview-row">
-          <span>flowseal-zapret</span>
-          <strong>{{ status?.installed_version || "не установлен" }}</strong>
-        </div>
-        <div class="overview-row">
-          <span>Доступно</span>
-          <strong :class="{ accent: updateCount > 0 }">
-            {{ updateCount > 0 ? `${updateCount} обновление(я)` : "актуально" }}
-          </strong>
-        </div>
-
-        <button class="btn small" type="button" @click="router.push('/settings')">
-          Открыть настройки
-          <ArrowUpRight :size="14" />
-        </button>
-      </section>
+      <Card class="power-card power-card-muted">
+        <CardHeader class="power-head">
+          <div class="power-icon telegram"><Send :size="19" /></div>
+          <div class="power-heading">
+            <CardTitle>Telegram</CardTitle>
+            <CardDescription>WS-прокси · скоро</CardDescription>
+          </div>
+          <Switch :model-value="false" disabled aria-label="Telegram WS-прокси скоро" />
+        </CardHeader>
+        <CardContent class="power-content">
+          <p class="muted power-placeholder">
+            Управление встроенным Telegram WS-прокси появится здесь: подключение, ключ, порт и
+            собственный Worker.
+          </p>
+        </CardContent>
+      </Card>
     </div>
 
-    <section class="glass-card bench-card">
-      <div class="card-head">
+    <Card class="updates-card">
+      <CardHeader class="updates-head">
         <div>
-          <span class="eyebrow">Диагностика</span>
-          <h2>Последняя проверка</h2>
+          <span class="eyebrow">Обновления</span>
+          <CardTitle>Версии и обновления</CardTitle>
         </div>
-        <span class="card-icon"><Gauge :size="17" /></span>
-      </div>
+        <button
+          class="update-orbit"
+          :class="{ loading: checkingAllUpdates }"
+          type="button"
+          aria-label="Проверить обновления приложения и flowseal-zapret"
+          title="Проверить обновления приложения и flowseal-zapret"
+          :disabled="checkingAllUpdates || benchRunning"
+          @click="checkAllUpdates"
+        >
+          <RefreshCw :size="17" />
+        </button>
+      </CardHeader>
+      <CardContent class="updates-content">
+        <div class="update-row">
+          <div>
+            <span class="update-name">Приложение</span>
+            <strong class="update-version">{{ appVersion || "—" }}</strong>
+          </div>
+          <div class="update-actions">
+            <span v-if="appHasUpdate" class="update-available"
+              >Доступно {{ appUpdate?.latest }}</span
+            >
+            <button
+              v-if="appHasUpdate"
+              class="btn small primary"
+              type="button"
+              :disabled="busy || benchRunning || !appUpdate?.can_auto_update"
+              @click="applyAppUpdate"
+            >
+              Обновить
+            </button>
+            <button
+              v-else
+              class="btn small"
+              type="button"
+              :disabled="checkingAppUpdate || benchRunning"
+              @click="checkAppUpdate(false)"
+            >
+              {{ checkingAppUpdate ? "Проверка…" : "Проверить" }}
+            </button>
+          </div>
+        </div>
 
-      <template v-if="benchSummary">
-        <div class="bench-summary">
-          <div class="bench-stat">
-            <span>Лучший результат</span>
-            <strong>{{ benchSummary.best || "—" }}</strong>
+        <div class="update-row">
+          <div>
+            <span class="update-name">flowseal-zapret</span>
+            <strong class="update-version">{{
+              status?.installed_version || "не установлен"
+            }}</strong>
           </div>
-          <div class="bench-stat">
-            <span>Балл</span>
-            <strong>{{ bestScore ?? "—" }}</strong>
+          <div class="update-actions">
+            <span v-if="zapretHasUpdate" class="update-available">
+              Доступно {{ updateInfo?.latest }}
+            </span>
+            <button
+              v-if="zapretHasUpdate"
+              class="btn small primary"
+              type="button"
+              :disabled="busy || benchRunning"
+              @click="applyUpdate"
+            >
+              Обновить
+            </button>
+            <button
+              v-else
+              class="btn small"
+              type="button"
+              :disabled="checkingUpdate || benchRunning"
+              @click="checkUpdate(false)"
+            >
+              {{ checkingUpdate ? "Проверка…" : "Проверить" }}
+            </button>
           </div>
-          <div class="bench-stat">
-            <span>Проверено</span>
-            <strong>{{ benchHostCount }} целей</strong>
-          </div>
-          <div class="bench-stat">
-            <span>Когда</span>
-            <strong>{{ benchDate }}</strong>
-          </div>
+        </div>
+      </CardContent>
+    </Card>
+
+    <Card v-if="benchSummary" class="last-check-card">
+      <CardContent class="last-check-content">
+        <div>
+          <span class="eyebrow">Последняя проверка</span>
+          <strong>{{ benchSummary.best || "Без победителя" }}</strong>
+        </div>
+        <div class="last-check-stats">
+          <span
+            >Балл <strong>{{ bestScore ?? "—" }}</strong></span
+          >
+          <span>{{ benchDate }}</span>
         </div>
         <button class="btn small" type="button" @click="router.push('/zapret')">
-          <ShieldCheck :size="14" />
           К стратегиям
+          <ArrowUpRight :size="13" />
         </button>
-      </template>
-      <p v-else class="muted">
-        Проверка ещё не запускалась. Перейдите в Zapret и запустите «Все стратегии».
-      </p>
-    </section>
-
-    <section class="glass-card quick-card">
-      <div class="card-head">
-        <div>
-          <span class="eyebrow">Быстрый доступ</span>
-          <h2>Действия</h2>
-        </div>
-      </div>
-      <div class="quick-actions">
-        <button class="btn small" type="button" @click="checkAppUpdate(false)">
-          <RefreshCw :size="14" />
-          Проверить приложение
-        </button>
-        <button class="btn small" type="button" @click="checkUpdate(false)">
-          <ShieldCheck :size="14" />
-          Проверить flowseal-zapret
-        </button>
-        <button class="btn small" type="button" @click="openFolder">
-          <FolderOpen :size="14" />
-          Открыть папку
-        </button>
-      </div>
-    </section>
+      </CardContent>
+    </Card>
   </div>
 </template>

@@ -47,6 +47,12 @@ let unlisteners: Array<() => void> = [];
 let initialized = false;
 let budgetInitialized = false;
 
+export function applyTheme(theme: string | undefined) {
+  const normalized = theme === "light" || theme === "gray" ? theme : "dark";
+  document.documentElement.dataset.theme = normalized;
+  document.documentElement.classList.toggle("dark", normalized !== "light");
+}
+
 async function refreshInternal(quiet: boolean) {
   // Allow overlapping calls (a polling tick may coincide with an action) but
   // only let the latest one write state, so responses cannot land out of order.
@@ -58,6 +64,7 @@ async function refreshInternal(quiet: boolean) {
     if (seq !== refreshSeq) return;
     status.value = nextStatus;
     config.value = nextConfig;
+    applyTheme(nextConfig.theme);
     if (!budgetInitialized && config.value) {
       budget.value = config.value.bench_budget;
       budgetInitialized = true;
@@ -132,6 +139,9 @@ export async function initStore() {
 
   await refreshInternal(false);
   await loadWhatsNew();
+  if (config.value?.theme) {
+    void invoke("set_theme", { theme: config.value.theme }).catch(() => undefined);
+  }
   try {
     benchSummary.value = await invoke<BenchSummary | null>("get_last_bench");
   } catch (error) {
@@ -405,6 +415,16 @@ export async function applyAppUpdate() {
     toast("error", String(error));
     busy.value = false;
     appUpdateProgress.value = null;
+  }
+}
+
+export async function setTheme(theme: "dark" | "gray" | "light") {
+  applyTheme(theme);
+  try {
+    await invoke("set_theme", { theme });
+    await refreshInternal(true);
+  } catch (error) {
+    toast("error", String(error));
   }
 }
 

@@ -71,6 +71,28 @@ pub fn set_runtime_path(state: State<'_, AppState>, path: String) -> AppResult<S
 }
 
 #[tauri::command]
+pub fn set_theme(
+    app: tauri::AppHandle,
+    state: State<'_, AppState>,
+    theme: String,
+) -> AppResult<()> {
+    let theme = match theme.as_str() {
+        "light" => "light",
+        "gray" => "gray",
+        _ => "dark",
+    };
+    {
+        let mut cfg = lock_config(&state);
+        cfg.theme = theme.to_string();
+        config::save_config(&cfg)?;
+    }
+    if let Some(window) = tauri::Manager::get_webview_window(&app, "main") {
+        crate::apply_titlebar_theme(&window, theme != "light");
+    }
+    Ok(())
+}
+
+#[tauri::command]
 pub fn set_flashscore_bypass(state: State<'_, AppState>, enabled: bool) -> AppResult<()> {
     ensure_idle(&state)?;
     {

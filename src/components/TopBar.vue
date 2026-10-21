@@ -1,18 +1,9 @@
 <script setup lang="ts">
 import { computed } from "vue";
 import { useRoute, useRouter } from "vue-router";
-import { Bell, Play, Square } from "lucide-vue-next";
-import {
-  appUpdate,
-  benchRunning,
-  busy,
-  running,
-  runtimeReady,
-  statusText,
-  statusTone,
-  toggleStart,
-  updateInfo,
-} from "../store";
+import { getCurrentWindow } from "@tauri-apps/api/window";
+import { Bell, Minus, Square, X } from "lucide-vue-next";
+import { appUpdate, statusText, statusTone, updateInfo } from "../store";
 
 const route = useRoute();
 const router = useRouter();
@@ -21,13 +12,26 @@ const title = computed(() => (route.meta.title as string | undefined) ?? "zapret
 const hasUpdate = computed(
   () => !!appUpdate.value?.available || !!updateInfo.value?.update_available,
 );
+
+const appWindow = getCurrentWindow();
+
+function minimize() {
+  void appWindow.minimize();
+}
+
+function toggleMaximize() {
+  void appWindow.toggleMaximize();
+}
+
+function closeWindow() {
+  void appWindow.close();
+}
 </script>
 
 <template>
   <header class="topbar">
-    <div class="topbar-title">
-      <h1>{{ title }}</h1>
-      <span class="topbar-subtitle">flowseal-zapret manager</span>
+    <div class="topbar-title" data-tauri-drag-region @dblclick="toggleMaximize">
+      <h1 data-tauri-drag-region>{{ title }}</h1>
     </div>
 
     <div class="topbar-actions">
@@ -47,16 +51,27 @@ const hasUpdate = computed(
         <span>{{ statusText }}</span>
       </span>
 
-      <button
-        class="btn small topbar-toggle"
-        :class="{ danger: running }"
-        :disabled="busy || benchRunning || !runtimeReady"
-        @click="toggleStart"
-      >
-        <Square v-if="running" :size="14" />
-        <Play v-else :size="14" />
-        <span>{{ running ? "Остановить" : "Запустить" }}</span>
-      </button>
+      <div class="window-controls" aria-label="Управление окном">
+        <button class="window-control" type="button" aria-label="Свернуть" @click="minimize">
+          <Minus :size="15" />
+        </button>
+        <button
+          class="window-control"
+          type="button"
+          aria-label="Развернуть"
+          @click="toggleMaximize"
+        >
+          <Square :size="13" />
+        </button>
+        <button
+          class="window-control close"
+          type="button"
+          aria-label="Закрыть"
+          @click="closeWindow"
+        >
+          <X :size="15" />
+        </button>
+      </div>
     </div>
   </header>
 </template>

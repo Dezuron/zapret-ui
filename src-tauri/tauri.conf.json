@@ -1,7 +1,7 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
   "productName": "zapret-ui",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "identifier": "com.zapret.ui",
   "build": {
     "beforeDevCommand": "npm run dev",
@@ -19,8 +19,8 @@
         "minWidth": 760,
         "minHeight": 560,
         "center": true,
-        "decorations": true,
-        "theme": "Dark",
+        "decorations": false,
+        "shadow": true,
         "transparent": false,
         "resizable": true,
         "visible": false,
