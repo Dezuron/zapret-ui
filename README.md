@@ -1,5 +1,13 @@
 # zapret-ui
 
+<p align="center">
+  <img src="https://img.shields.io/badge/version-1.0.0-303036?style=flat-square" alt="Версия 1.0.0" />
+  <img src="https://img.shields.io/badge/Windows-11%20x64-303036?style=flat-square" alt="Windows 11 x64" />
+  <img src="https://img.shields.io/badge/language-RU-303036?style=flat-square" alt="Русский язык" />
+  <img src="https://img.shields.io/badge/license-MIT-303036?style=flat-square" alt="MIT" />
+  <img src="https://img.shields.io/badge/telemetry-none-2ea043?style=flat-square" alt="Без телеметрии" />
+</p>
+
 Современный графический менеджер для **flowseal-zapret** — пакета
 [zapret-discord-youtube](https://github.com/Flowseal/zapret-discord-youtube) от **Flowseal**,
 утилиты обхода DPI.
@@ -156,6 +164,14 @@ npm run check:version
 - **WebView2 Runtime** — в Windows 11 уже установлен.
 - **Права администратора** — нужны для WinDivert и службы `zapret`.
 - Доступ к GitHub для скачивания flowseal-zapret и проверки обновлений.
+
+## Приватность
+
+- **Нет телеметрии, аналитики, аккаунтов и внешних серверов.**
+- Приложение обращается только к GitHub API для проверки и скачивания обновлений
+  приложения и flowseal-zapret.
+- Конфиг, история проверок, списки и пользовательские настройки остаются локально.
+- Никакие данные о системе, выбранной стратегии или использовании не отправляются.
 
 ## Благодарности
 

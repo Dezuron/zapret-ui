@@ -19,7 +19,7 @@ import {
 </script>
 
 <template>
-  <Panel step="1" title="Подключение">
+  <Panel title="Подключение">
     <div class="status-line">
       <span class="status-dot" :class="statusTone" aria-hidden="true"></span>
       <div class="status-line-text">

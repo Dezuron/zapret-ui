@@ -33,7 +33,7 @@ import {
 </script>
 
 <template>
-  <Panel step="3" title="Обслуживание">
+  <Panel title="Настройки">
     <section class="section">
       <h3>Обновления</h3>
 
