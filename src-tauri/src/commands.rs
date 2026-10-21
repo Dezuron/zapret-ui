@@ -70,6 +70,7 @@ pub struct ConfigView {
     pub game_filter: String,
     pub runtime_version: String,
     pub runtime_path: String,
+    pub theme: String,
     pub bench_budget: usize,
     pub bench_auto_apply: bool,
 }
@@ -189,6 +190,7 @@ pub fn get_config(state: State<'_, AppState>) -> AppResult<ConfigView> {
         game_filter: cfg.game_filter.as_str().to_string(),
         runtime_version: cfg.runtime_version.clone(),
         runtime_path: config::runtime_dir().to_string_lossy().to_string(),
+        theme: cfg.theme.clone(),
         bench_budget: cfg.bench_budget,
         bench_auto_apply: cfg.bench_auto_apply,
     })

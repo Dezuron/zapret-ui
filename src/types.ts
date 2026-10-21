@@ -31,6 +31,7 @@ export interface ConfigView {
   game_filter: string;
   runtime_version: string;
   runtime_path: string;
+  theme: string;
   bench_budget: number;
   bench_auto_apply: boolean;
 }

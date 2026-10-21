@@ -30,7 +30,7 @@ import {
 </script>
 
 <template>
-  <Panel step="2" title="Стратегии" class="strategy-panel">
+  <Panel title="Стратегии" class="strategy-panel">
     <template #actions>
       <span v-if="benchSummary?.results.length" class="panel-count">
         {{ benchSummary.results.length }} проверено
