@@ -6,6 +6,7 @@ import {
   tgwsLogTail,
   tgwsStateLabel,
   tgwsTone,
+  tgwsVersionLabel,
 } from "./tgws";
 
 describe("tgwsStateLabel", () => {
@@ -49,6 +50,15 @@ describe("isPublicBinding", () => {
     expect(isPublicBinding("127.0.0.1")).toBe(false);
     expect(isPublicBinding("localhost")).toBe(false);
     expect(isPublicBinding("192.168.1.10")).toBe(true);
+  });
+});
+
+describe("tgwsVersionLabel", () => {
+  it("prefers the release tag, then falls back to the binary state", () => {
+    expect(tgwsVersionLabel("1.11.2-1", true)).toBe("1.11.2-1");
+    expect(tgwsVersionLabel("", true)).toBe("вручную");
+    expect(tgwsVersionLabel(null, false)).toBe("не установлен");
+    expect(tgwsVersionLabel("  ", undefined)).toBe("не установлен");
   });
 });
 

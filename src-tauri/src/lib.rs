@@ -441,6 +441,8 @@ pub fn run() {
                 if enabled && crate::config::tgws_binary_path().exists() {
                     let handle = app.handle().clone();
                     std::thread::spawn(move || {
+                        // A failure is published through `tgws-status` and shown
+                        // on the Telegram page, so nothing is silently lost.
                         let _ = crate::tgws::start(&handle);
                     });
                 }

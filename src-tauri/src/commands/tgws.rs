@@ -68,17 +68,12 @@ pub async fn check_tgws_update(
 }
 
 #[tauri::command]
-pub async fn install_tgws_update(
-    app: tauri::AppHandle,
-    url: String,
-    version: String,
-    digest: String,
-) -> AppResult<u64> {
-    Ok(tauri::async_runtime::spawn_blocking(move || {
-        tgws::install_update(&app, &url, &version, &digest)
-    })
-    .await
-    .map_err(|e| e.to_string())??)
+pub async fn install_tgws_update(app: tauri::AppHandle) -> AppResult<u64> {
+    Ok(
+        tauri::async_runtime::spawn_blocking(move || tgws::install_latest(&app))
+            .await
+            .map_err(|e| e.to_string())??,
+    )
 }
 
 #[tauri::command]
@@ -92,25 +87,37 @@ pub fn set_tgws_autostart(app: tauri::AppHandle, enabled: bool) -> AppResult<()>
 }
 
 #[tauri::command]
-pub fn set_tgws_host(app: tauri::AppHandle, host: String) -> AppResult<String> {
+pub async fn set_tgws_host(app: tauri::AppHandle, host: String) -> AppResult<String> {
     let host = tgws::validate_host(&host)?;
     let saved = host.clone();
-    tgws::update_settings(&app, move |cfg| cfg.host = host)?;
+    tauri::async_runtime::spawn_blocking(move || {
+        tgws::update_settings(&app, move |cfg| cfg.host = host)
+    })
+    .await
+    .map_err(|e| e.to_string())??;
     Ok(saved)
 }
 
 #[tauri::command]
-pub fn set_tgws_port(app: tauri::AppHandle, port: u16) -> AppResult<u16> {
+pub async fn set_tgws_port(app: tauri::AppHandle, port: u16) -> AppResult<u16> {
     let port = tgws::validate_port(port)?;
-    tgws::update_settings(&app, move |cfg| cfg.port = port)?;
+    tauri::async_runtime::spawn_blocking(move || {
+        tgws::update_settings(&app, move |cfg| cfg.port = port)
+    })
+    .await
+    .map_err(|e| e.to_string())??;
     Ok(port)
 }
 
 #[tauri::command]
-pub fn set_tgws_secret(app: tauri::AppHandle, secret: String) -> AppResult<String> {
+pub async fn set_tgws_secret(app: tauri::AppHandle, secret: String) -> AppResult<String> {
     let secret = tgws::validate_secret(&secret)?;
     let saved = secret.clone();
-    tgws::update_settings(&app, move |cfg| cfg.secret = secret)?;
+    tauri::async_runtime::spawn_blocking(move || {
+        tgws::update_settings(&app, move |cfg| cfg.secret = secret)
+    })
+    .await
+    .map_err(|e| e.to_string())??;
     Ok(saved)
 }
 

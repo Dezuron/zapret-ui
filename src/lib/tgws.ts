@@ -52,6 +52,16 @@ export function tgwsEndpoint(host: string | undefined, port: number | undefined)
   return `${rendered}:${port ?? 1443}`;
 }
 
+/** Version shown for the proxy binary: tag, "вручную" or "не установлен". */
+export function tgwsVersionLabel(
+  installedVersion: string | undefined | null,
+  binaryPresent: boolean | undefined,
+): string {
+  const version = (installedVersion ?? "").trim();
+  if (version) return version;
+  return binaryPresent ? "вручную" : "не установлен";
+}
+
 /** Keeps the in-memory log buffer bounded, mirroring the backend's ring buffer. */
 export function tgwsLogTail(lines: string[], limit = 300): string[] {
   if (lines.length <= limit) return [...lines];

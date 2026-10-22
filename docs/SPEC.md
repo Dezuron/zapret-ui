@@ -323,7 +323,7 @@
   для Windows — трей-GUI; у него **нет** `--host/--port/--secret`, параметры берутся из
   `%APPDATA%\TgWsProxy\config.json`. Поэтому в нашем репозитории собирается headless-бинарник
   из **штатного консольного входа** upstream (`proxy.tg_ws_proxy:main`): `scripts/tgws/entry.py`
-  (4 строки) + `scripts/tgws/tgws-cli.spec`. GUI-зависимости (`pystray`, `customtkinter`,
+  (12 строк) + `scripts/tgws/tgws-cli.spec`. GUI-зависимости (`pystray`, `customtkinter`,
   `Pillow`, `pyperclip`, `psutil`) исключены из бандла.
 - **Сборка:** `.github/workflows/tgws-build.yml` по тегу `tgws-v<upstream>-<revision>`
   (например `tgws-v1.11.2-1`): клонирует upstream на тег `v1.11.2`, ставит его и PyInstaller,
@@ -348,14 +348,18 @@
   ожидание exit до 3 с.
 - **Статусы:** `stopped | starting | running | stopping | error | not_installed`; эмитятся
   событием `tgws-status`, строки лога — `tgws-log`.
-- **Ссылка:** `tg://proxy?server=<host>&port=<port>&secret=dd<secret>` — префикс `dd`
-  (fake-TLS MTProto) формирует сам upstream. Для `0.0.0.0`/`::` в ссылке подставляется
-  `127.0.0.1`; IPv6 берётся в скобки.
+- **Ссылка:** `tg://proxy?server=<host>&port=<port>&secret=dd<secret>`; если в конфиге задан
+  `fake_tls_domain`, upstream ждёт `ee<secret><hex(домена)>`, и приложение строит именно такую
+  ссылку (`link_for`). Для `0.0.0.0`/`::` в ссылке подставляется `127.0.0.1`; IPv6 берётся
+  в скобки.
 - **Обновления:** `GET /repos/Dezuron/zapret-ui/releases?per_page=30`, фильтр тегов
   `tgws-v*`, максимальная версия, ассет `tgws-cli-windows-x64.exe`, `digest` обязателен.
-  Кэш 12 ч (память + `tgws_update_cache.json`), «Позже» пишет `dismissed_update_tag`.
-  Установка: стоп → скачать → SHA-256 → `taskkill` образа (снять write-lock) → атомарная
-  замена с откатом → сохранить версию → перезапуск, если работал.
+  Кэш 12 ч (память + `tgws_update_cache.json` в корне данных приложения), «Позже» пишет
+  `dismissed_update_tag` (скрывает только пассивный баннер; в «Настройках» обновление остаётся
+  доступным). Ссылку, версию и digest для установки backend берёт из своего кэша релиза, а не
+  из webview. Установка: стоп → скачать → SHA-256 → `taskkill` образа (снять write-lock) →
+  запись `tgws-cli.exe.new` → замена с бэкапом `.old` и восстановлением при следующем старте →
+  сохранить версию → перезапуск, если работал.
 - **Жизненный цикл:** автостарт в `setup`, если `autostart` и бинарник есть; закрытие окна
   (`X`) прячет в трей и прокси продолжает работать; выход из приложения
   (`RunEvent::ExitRequested`/`Exit`) останавливает прокси и убивает возможного сироту.

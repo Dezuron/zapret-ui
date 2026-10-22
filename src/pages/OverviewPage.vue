@@ -34,7 +34,7 @@ import {
   toggleTgws,
   updateInfo,
 } from "../store";
-import { tgwsEndpoint } from "../lib/tgws";
+import { tgwsEndpoint, tgwsVersionLabel } from "../lib/tgws";
 
 const router = useRouter();
 
@@ -55,11 +55,11 @@ const checkingAllUpdates = computed(() => checkingAppUpdate.value || checkingUpd
 const telegramEndpoint = computed(() =>
   tgwsEndpoint(config.value?.tgws.host, config.value?.tgws.port),
 );
-const telegramVersion = computed(
-  () =>
-    config.value?.tgws.installed_version ||
-    tgwsStatus.value?.installed_version ||
-    (tgwsStatus.value?.binary_present ? "вручную" : "не установлен"),
+const telegramVersion = computed(() =>
+  tgwsVersionLabel(
+    config.value?.tgws.installed_version || tgwsStatus.value?.installed_version,
+    tgwsStatus.value?.binary_present,
+  ),
 );
 
 async function checkAllUpdates() {

@@ -53,9 +53,10 @@
 ├── config.json          — настройки (стратегия, автозапуск, game filter, бюджет подбора, runtime_path)
 ├── runtime\             — распакованный zapret по умолчанию (bin/, lists/, utils/, *.bat)
 ├── bench.json           — история проверок (последние 20)
+├── tgws_update_cache.json — кэш проверки релизов прокси (12 ч)
 ├── bench_state.json     — маркер незавершённого прогона (восстановление после падения)
 ├── generated.json       — экспериментальные стратегии
-├── tgws\                — Telegram-прокси: tgws-cli.exe, tgws.log, кэш обновлений
+├── tgws\                — Telegram-прокси: tgws-cli.exe, tgws.log
 └── tmp\                 — временные файлы обновления
 ```
 

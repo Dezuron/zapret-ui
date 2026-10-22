@@ -69,9 +69,9 @@ repository's `tgws-v*` releases into `%LOCALAPPDATA%\zapret-ui\tgws\`.
 
 The binary is built in GitHub Actions from the **unmodified** upstream sources at
 the tag named in the release (`tgws-v1.11.2-1` → upstream `v1.11.2`). The only
-addition is a four-line launcher (`scripts/tgws/entry.py`) that calls the
-upstream console entry point `proxy.tg_ws_proxy:main`, so the frozen executable
-starts headless instead of creating a tray icon and GUI dialogs
+addition is a small launcher (`scripts/tgws/entry.py`) that calls the upstream
+console entry point `proxy.tg_ws_proxy:main`, so the frozen executable starts
+headless instead of creating a tray icon and GUI dialogs
 (`scripts/tgws/tgws-cli.spec`). Upstream's own Windows release remains the
 tray application and is not redistributed here.
 
@@ -80,7 +80,7 @@ The upstream MIT license text:
 ```text
 MIT License
 
-Copyright (c) Flowseal and tg-ws-proxy contributors
+Copyright (c) 2026 Flowseal
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files (the "Software"), to deal

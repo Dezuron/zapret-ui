@@ -19,7 +19,13 @@ import Button from "../components/ui/button/Button.vue";
 import Switch from "../components/ui/switch/Switch.vue";
 import Toggle from "../components/Toggle.vue";
 import { formatBytes } from "../lib/labels";
-import { displayHost, isPublicBinding, tgwsEndpoint, tgwsTone } from "../lib/tgws";
+import {
+  displayHost,
+  isPublicBinding,
+  tgwsEndpoint,
+  tgwsTone,
+  tgwsVersionLabel,
+} from "../lib/tgws";
 import {
   applyTgwsUpdate,
   checkTgwsUpdate,
@@ -58,11 +64,11 @@ const tone = computed(() => tgwsTone(tgwsStatus.value?.state));
 const endpointLabel = computed(() =>
   tgwsEndpoint(config.value?.tgws.host, config.value?.tgws.port),
 );
-const versionLabel = computed(
-  () =>
-    config.value?.tgws.installed_version ||
-    tgwsStatus.value?.installed_version ||
-    (tgwsStatus.value?.binary_present ? "вручную" : "не установлен"),
+const versionLabel = computed(() =>
+  tgwsVersionLabel(
+    config.value?.tgws.installed_version || tgwsStatus.value?.installed_version,
+    tgwsStatus.value?.binary_present,
+  ),
 );
 const transitioning = computed(
   () => tgwsStatus.value?.state === "starting" || tgwsStatus.value?.state === "stopping",
@@ -125,7 +131,7 @@ async function commitSecret() {
 
 <template>
   <div class="page-stack tgws-page">
-    <Card class="tgws-hero">
+    <Card class="tgws-card tgws-hero">
       <CardHeader class="tgws-hero-head">
         <div class="tgws-hero-icon"><Send :size="21" /></div>
         <div class="tgws-hero-text">
@@ -163,7 +169,7 @@ async function commitSecret() {
           <Button
             variant="outline"
             size="sm"
-            :disabled="tgwsBusy || transitioning"
+            :disabled="tgwsBusy || transitioning || !tgwsRunning"
             @click="restartTgws"
           >
             <RotateCw :size="14" />
@@ -177,7 +183,7 @@ async function commitSecret() {
             variant="ghost"
             size="sm"
             :disabled="tgwsChecking"
-            @click="checkTgwsUpdate(false)"
+            @click="checkTgwsUpdate(false, true)"
           >
             <RefreshCw :size="14" :class="{ spinning: tgwsChecking }" />
             {{ tgwsChecking ? "Проверка…" : "Проверить обновление" }}
@@ -192,7 +198,7 @@ async function commitSecret() {
       </CardContent>
     </Card>
 
-    <Card v-if="tgwsHasUpdate && tgwsUpdate?.latest" class="tgws-update">
+    <Card v-if="tgwsHasUpdate && tgwsUpdate?.latest" class="tgws-card tgws-update">
       <CardContent class="tgws-update-content">
         <div class="tgws-update-icon"><Download :size="18" /></div>
         <div class="tgws-update-text">
@@ -216,7 +222,7 @@ async function commitSecret() {
       </CardContent>
     </Card>
 
-    <Card>
+    <Card class="tgws-card">
       <CardHeader>
         <CardTitle>Подключение</CardTitle>
         <CardDescription>
@@ -233,6 +239,7 @@ async function commitSecret() {
             variant="outline"
             size="icon"
             title="Копировать ссылку"
+            aria-label="Копировать ссылку"
             :disabled="!tgwsLink"
             @click="copyTgwsLink"
           >
@@ -242,6 +249,7 @@ async function commitSecret() {
             variant="outline"
             size="icon"
             title="Открыть в Telegram"
+            aria-label="Открыть ссылку в Telegram"
             :disabled="!tgwsLink"
             @click="openTgwsInTelegram"
           >
@@ -251,6 +259,7 @@ async function commitSecret() {
             variant="outline"
             size="icon"
             title="Сменить ключ и ссылку"
+            aria-label="Сменить ключ и ссылку"
             :disabled="tgwsBusy"
             @click="regenerateTgwsSecret"
           >
@@ -264,7 +273,7 @@ async function commitSecret() {
       </CardContent>
     </Card>
 
-    <Card>
+    <Card class="tgws-card">
       <CardHeader>
         <CardTitle>Параметры</CardTitle>
         <CardDescription>
@@ -327,7 +336,7 @@ async function commitSecret() {
       </CardContent>
     </Card>
 
-    <Card>
+    <Card class="tgws-card">
       <CardHeader class="tgws-log-head">
         <div>
           <CardTitle>Логи</CardTitle>
@@ -351,6 +360,16 @@ async function commitSecret() {
   padding-bottom: 8px;
 }
 
+/* Same glass treatment as the panels on the overview and settings pages. */
+.tgws-card {
+  border-color: var(--glass-border);
+  background: linear-gradient(160deg, var(--glass-bg), var(--glass-bg-2));
+  box-shadow:
+    0 18px 50px var(--glass-shadow),
+    inset 0 1px 0 var(--glass-highlight);
+  backdrop-filter: blur(18px) saturate(135%);
+}
+
 .tgws-hero-head {
   display: flex;
   align-items: center;
@@ -364,8 +383,8 @@ async function commitSecret() {
   height: 40px;
   flex: 0 0 auto;
   border-radius: 12px;
-  border: 1px solid rgba(88, 101, 242, 0.35);
-  background: rgba(88, 101, 242, 0.16);
+  border: 1px solid var(--glass-border);
+  background: var(--accent-soft);
   color: var(--accent-text);
 }
 
@@ -420,9 +439,9 @@ async function commitSecret() {
 .tgws-meta div {
   min-width: 0;
   padding: 9px 10px;
-  border: 1px solid rgba(255, 255, 255, 0.06);
+  border: 1px solid var(--border);
   border-radius: 8px;
-  background: rgba(255, 255, 255, 0.025);
+  background: var(--muted);
 }
 
 .tgws-meta span {
@@ -467,21 +486,24 @@ async function commitSecret() {
 }
 
 .tgws-error {
-  border: 1px solid rgba(242, 63, 67, 0.35);
+  border: 1px solid color-mix(in oklab, var(--danger) 40%, transparent);
   background: var(--danger-soft);
-  color: #ffb4b6;
+  color: var(--danger);
 }
 
 .tgws-warning {
-  border: 1px solid rgba(240, 178, 50, 0.3);
+  border: 1px solid color-mix(in oklab, var(--warn) 40%, transparent);
   background: var(--warn-soft);
-  color: #ffd98a;
+  color: var(--warn);
 }
 
 .tgws-update-content {
   display: flex;
   align-items: center;
   gap: 12px;
+  /* CardContent defaults to pt-0 (it normally follows a header); this banner
+     has no header, so it needs its own vertical rhythm. */
+  padding: 14px 16px;
 }
 
 .tgws-update-icon {
@@ -491,7 +513,7 @@ async function commitSecret() {
   height: 34px;
   flex: 0 0 auto;
   border-radius: 10px;
-  background: rgba(88, 101, 242, 0.16);
+  background: var(--accent-soft);
   color: var(--accent-text);
 }
 
@@ -534,9 +556,9 @@ async function commitSecret() {
   min-width: 0;
   overflow-x: auto;
   padding: 9px 11px;
-  border: 1px solid var(--glass-border);
+  border: 1px solid var(--border);
   border-radius: 9px;
-  background: rgba(0, 0, 0, 0.24);
+  background: var(--muted);
   color: var(--text-2);
   font-family: var(--mono);
   font-size: 11px;
@@ -569,17 +591,21 @@ async function commitSecret() {
   width: 100%;
   height: 34px;
   padding: 0 10px;
-  border: 1px solid var(--glass-border);
+  border: 1px solid var(--border);
   border-radius: 8px;
-  background: rgba(0, 0, 0, 0.22);
+  background: var(--secondary);
   color: var(--text);
   font: inherit;
   font-size: 12px;
 }
 
+.tgws-input::placeholder {
+  color: var(--text-3);
+}
+
 .tgws-input:focus-visible {
   outline: none;
-  border-color: rgba(88, 101, 242, 0.6);
+  border-color: var(--primary);
   box-shadow: var(--ring);
 }
 
@@ -600,9 +626,9 @@ async function commitSecret() {
   margin: 0;
   overflow: auto;
   padding: 10px 12px;
-  border: 1px solid var(--glass-border);
+  border: 1px solid var(--border);
   border-radius: 9px;
-  background: rgba(0, 0, 0, 0.3);
+  background: var(--secondary);
   color: var(--text-2);
   font-family: var(--mono);
   font-size: 11px;

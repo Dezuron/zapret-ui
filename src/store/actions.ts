@@ -654,20 +654,23 @@ export async function refreshTgws() {
 async function refreshTgwsLink() {
   try {
     tgwsLink.value = await invoke<string>("get_tgws_link");
-  } catch {
+  } catch (error) {
+    console.warn("Не удалось получить ссылку Telegram-прокси", error);
     tgwsLink.value = "";
   }
 }
 
-export async function checkTgwsUpdate(silent = true) {
+export async function checkTgwsUpdate(silent = true, force = false) {
   if (tgwsChecking.value) return;
   tgwsChecking.value = true;
   try {
-    const info = await invoke<TgwsUpdateInfo>("check_tgws_update", { force: false });
-    tgwsUpdate.value = info;
+    const info = await invoke<TgwsUpdateInfo>("check_tgws_update", { force });
+    // An explicit check is a request to see updates, so a previously dismissed
+    // banner is allowed to come back for this session.
+    tgwsUpdate.value = force && info.has_update ? { ...info, dismissed: false } : info;
     if (!silent) {
       toast(
-        info.has_update ? "info" : "info",
+        "info",
         info.has_update && info.latest
           ? `Доступно обновление прокси ${info.latest}.`
           : "Обновлений Telegram-прокси нет.",
@@ -680,24 +683,10 @@ export async function checkTgwsUpdate(silent = true) {
   }
 }
 
-async function downloadTgwsBinary(): Promise<void> {
-  tgwsProgress.value = "Проверка релиза…";
-  const info = await invoke<TgwsUpdateInfo>("check_tgws_update", { force: true });
-  tgwsUpdate.value = info;
-  if (!info.asset_url || !info.latest) {
-    throw new Error(
-      "Релиз прокси ещё не опубликован. Бинарник публикуется тегом tgws-v* в этом репозитории.",
-    );
-  }
-  if (!info.digest) {
-    throw new Error("В релизе нет контрольной суммы SHA-256 — установка отменена.");
-  }
+/** Downloads and installs the newest proxy release (resolved by the backend). */
+async function installTgwsBinary(): Promise<void> {
   tgwsProgress.value = "Скачивание прокси…";
-  await invoke("install_tgws_update", {
-    url: info.asset_url,
-    version: info.latest,
-    digest: info.digest,
-  });
+  await invoke("install_tgws_update");
   tgwsProgress.value = "Готово";
 }
 
@@ -711,7 +700,7 @@ export async function toggleTgws() {
       toast("info", "Telegram-прокси остановлен.");
     } else {
       if (!tgwsStatus.value?.binary_present) {
-        await downloadTgwsBinary();
+        await installTgwsBinary();
       }
       await invoke("start_tgws");
       toast("success", "Telegram-прокси включён.");
@@ -743,9 +732,9 @@ export async function applyTgwsUpdate() {
   if (tgwsBusy.value) return;
   tgwsBusy.value = true;
   try {
-    await downloadTgwsBinary();
+    await installTgwsBinary();
     await refreshTgws();
-    await checkTgwsUpdate();
+    await checkTgwsUpdate(true, true);
     toast("success", "Telegram-прокси обновлён.");
   } catch (error) {
     toast("error", String(error));
@@ -780,9 +769,9 @@ export async function regenerateTgwsSecret() {
   }
 }
 
-export async function setTgwsHost(host: string) {
+async function setTgwsSetting<T>(command: string, args: Record<string, unknown>): Promise<T> {
   try {
-    const saved = await invoke<string>("set_tgws_host", { host });
+    const saved = await invoke<T>(command, args);
     await refreshInternal(true);
     await refreshTgws();
     return saved;
@@ -792,28 +781,16 @@ export async function setTgwsHost(host: string) {
   }
 }
 
-export async function setTgwsPort(port: number) {
-  try {
-    const saved = await invoke<number>("set_tgws_port", { port });
-    await refreshInternal(true);
-    await refreshTgws();
-    return saved;
-  } catch (error) {
-    toast("error", String(error));
-    throw error;
-  }
+export function setTgwsHost(host: string) {
+  return setTgwsSetting<string>("set_tgws_host", { host });
 }
 
-export async function setTgwsSecret(secret: string) {
-  try {
-    const saved = await invoke<string>("set_tgws_secret", { secret });
-    await refreshInternal(true);
-    await refreshTgws();
-    return saved;
-  } catch (error) {
-    toast("error", String(error));
-    throw error;
-  }
+export function setTgwsPort(port: number) {
+  return setTgwsSetting<number>("set_tgws_port", { port });
+}
+
+export function setTgwsSecret(secret: string) {
+  return setTgwsSetting<string>("set_tgws_secret", { secret });
 }
 
 export async function toggleTgwsAutostart(enabled: boolean) {

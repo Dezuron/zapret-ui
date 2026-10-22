@@ -18,7 +18,7 @@ use std::collections::VecDeque;
 use std::fs;
 use std::io::{BufRead, BufReader, Read, Write};
 use std::net::{Ipv6Addr, TcpListener};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
 use std::sync::{Mutex, MutexGuard};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
@@ -150,7 +150,7 @@ fn set_status(app: &AppHandle, patch: impl FnOnce(&mut TgwsStatus)) -> TgwsStatu
     snapshot
 }
 
-fn fail(app: &AppHandle, message: impl Into<String>) -> String {
+fn mark_failed(app: &AppHandle, message: impl Into<String>) -> String {
     let message = message.into();
     set_status(app, |s| {
         s.state = if config::tgws_binary_path().exists() {
@@ -196,7 +196,14 @@ fn append_log_file(line: &str) {
         .map(|m| m.len() > LOG_MAX_BYTES)
         .unwrap_or(false)
     {
-        let _ = fs::rename(&path, path.with_extension("log.1"));
+        let backup = path.with_extension("log.1");
+        // Windows refuses to rename over an existing file, so drop the old
+        // backup first; if the rename still fails (file locked), truncate the
+        // log so it cannot grow without bound.
+        let _ = fs::remove_file(&backup);
+        if fs::rename(&path, &backup).is_err() {
+            let _ = fs::write(&path, b"");
+        }
     }
     if let Ok(mut file) = fs::OpenOptions::new().create(true).append(true).open(&path) {
         let _ = writeln!(file, "{line}");
@@ -255,10 +262,12 @@ pub fn ensure_secret(app: &AppHandle) -> Result<String, String> {
 
 // ---------- link ----------
 
-/// `tg://` link for Telegram Desktop. The `dd` prefix marks a fake-TLS MTProto
-/// secret — that is what upstream itself generates, and it is what Telegram
-/// accepts for this proxy.
-pub fn link_for(host: &str, port: u16, secret: &str) -> String {
+/// `tg://` link for Telegram Desktop.
+///
+/// A plain MTProto secret is prefixed with `dd`; when fake TLS is enabled the
+/// upstream entry point expects `ee<secret><hex(domain)>` instead, and a `dd`
+/// link would not connect. This mirrors `proxy/tg_ws_proxy.py` upstream.
+pub fn link_for(host: &str, port: u16, secret: &str, fake_tls_domain: &str) -> String {
     let host = match host.trim() {
         "" | "0.0.0.0" | "::" | "[::]" => "127.0.0.1".to_string(),
         other => other.to_string(),
@@ -268,35 +277,53 @@ pub fn link_for(host: &str, port: u16, secret: &str) -> String {
     } else {
         host
     };
-    format!("tg://proxy?server={host}&port={port}&secret=dd{secret}")
+
+    let fake_tls = fake_tls_domain.trim();
+    let secret = if fake_tls.is_empty() {
+        format!("dd{secret}")
+    } else {
+        let domain_hex: String = fake_tls.bytes().map(|b| format!("{b:02x}")).collect();
+        format!("ee{secret}{domain_hex}")
+    };
+
+    format!("tg://proxy?server={host}&port={port}&secret={secret}")
 }
 
 pub fn link(app: &AppHandle) -> Result<String, String> {
     let secret = ensure_secret(app)?;
     let cfg = load_cfg(app);
-    Ok(link_for(&cfg.host, cfg.port, &secret))
+    Ok(link_for(&cfg.host, cfg.port, &secret, &cfg.fake_tls_domain))
 }
 
 /// Replaces the secret with a fresh one and restarts a running proxy so the
 /// new `tg://` link becomes valid immediately.
 pub fn regenerate_secret(app: &AppHandle) -> Result<String, String> {
+    let state = app.state::<AppState>();
+    let _guard = lock(&state.tgws.op);
     let fresh = generate_secret()?;
     save_cfg(app, |cfg| cfg.secret = fresh.clone())?;
     if status(app).state == TgwsState::Running {
-        restart(app)?;
+        stop_locked(app)?;
+        std::thread::sleep(Duration::from_millis(300));
+        start_locked(app)?;
     }
     Ok(fresh)
 }
 
 /// Applies a settings change and restarts the proxy when it is running, so the
-/// UI never shows values that the live process does not use.
+/// UI never shows values that the live process does not use. Runs under the
+/// operation lock: a concurrent start must not read a half-applied config.
 pub fn update_settings(
     app: &AppHandle,
     patch: impl FnOnce(&mut config::TgwsConfig),
 ) -> Result<(), String> {
+    let state = app.state::<AppState>();
+    let _guard = lock(&state.tgws.op);
     save_cfg(app, patch)?;
     if status(app).state == TgwsState::Running {
-        restart(app)?;
+        stop_locked(app)?;
+        std::thread::sleep(Duration::from_millis(300));
+        start_locked(app)?;
     }
     Ok(())
 }
@@ -413,7 +440,7 @@ fn ensure_port_free(app: &AppHandle, cfg: &config::TgwsConfig) -> Result<(), Str
     if port_available(&cfg.host, cfg.port) {
         return Ok(());
     }
-    Err(fail(
+    Err(mark_failed(
         app,
         format!(
             "Порт {} занят другим приложением. Укажите другой порт в параметрах.",
@@ -450,8 +477,9 @@ fn start_locked(app: &AppHandle) -> Result<(), String> {
         }
     }
 
+    recover_binary(&config::tgws_dir());
     if !config::tgws_binary_path().exists() {
-        return Err(fail(
+        return Err(mark_failed(
             app,
             "Прокси ещё не скачан. Включите его, чтобы загрузить бинарник.",
         ));
@@ -480,7 +508,12 @@ fn start_locked(app: &AppHandle) -> Result<(), String> {
 
     let mut child = match cmd.spawn() {
         Ok(child) => child,
-        Err(e) => return Err(fail(app, format!("Не удалось запустить прокси: {e}"))),
+        Err(e) => {
+            return Err(mark_failed(
+                app,
+                format!("Не удалось запустить прокси: {e}"),
+            ))
+        }
     };
     let pid = child.id();
 
@@ -513,14 +546,18 @@ fn start_locked(app: &AppHandle) -> Result<(), String> {
     if let Some(reason) = exited {
         let state = app.state::<AppState>();
         *lock(&state.tgws.child) = None;
-        kill_image();
+        // Kill our own process tree only: a manually started instance on
+        // another port must survive a failed start of ours.
+        let _ = sys::command("taskkill.exe")
+            .args(["/F", "/T", "/PID", &pid.to_string()])
+            .status();
         let tail = log_tail(app, 3);
         let message = if tail.is_empty() {
             format!("Прокси завершился сразу после запуска ({reason}).")
         } else {
             format!("Прокси завершился сразу после запуска ({reason}). {tail}")
         };
-        return Err(fail(app, message));
+        return Err(mark_failed(app, message));
     }
 
     set_status(app, |s| {
@@ -563,7 +600,7 @@ fn spawn_watcher(app: AppHandle, pid: u32) {
         } else {
             format!("Прокси завершился неожиданно ({code}). {tail}")
         };
-        fail(&app, message);
+        mark_failed(&app, message);
         return;
     });
 }
@@ -606,7 +643,6 @@ fn stop_locked(app: &AppHandle) -> Result<(), String> {
     set_status(app, |s| {
         s.state = TgwsState::Stopped;
         s.pid = None;
-        s.last_error = None;
     });
     Ok(())
 }
@@ -625,9 +661,11 @@ pub fn stop_on_exit(app: &AppHandle) {
             .args(["/F", "/T", "/PID", &pid.to_string()])
             .status();
         let _ = child.wait();
+        // The spawned parent can leave the extracted child behind; both carry
+        // the same image name. Only runs when this app actually owned a proxy,
+        // so a manually started instance on another port is left alone.
+        kill_image();
     }
-    // A manual launch or a previous crash can leave an orphan behind.
-    kill_image();
 }
 
 // ---------- updates ----------
@@ -920,69 +958,114 @@ fn download(url: &str) -> Result<Vec<u8>, String> {
     Ok(bytes)
 }
 
-fn write_binary(bytes: &[u8]) -> Result<(), String> {
-    let dir = config::tgws_dir();
-    fs::create_dir_all(&dir).map_err(|e| format!("Не удалось создать папку прокси: {e}"))?;
+/// Writes the downloaded binary next to the current one and swaps it in.
+///
+/// `tgws-cli.exe.new` is written first and only renamed into place after the
+/// bytes are fully on disk, so a crash can never leave a truncated executable.
+/// The previous binary is kept as `.old` until the swap succeeds; a startup
+/// recovery restores it if the process dies between the two renames.
+fn write_binary(dir: &Path, bytes: &[u8]) -> Result<(), String> {
+    fs::create_dir_all(dir).map_err(|e| format!("Не удалось создать папку прокси: {e}"))?;
 
-    let binary = config::tgws_binary_path();
-    let backup = dir.join("tgws-cli.exe.old");
+    let binary = dir.join(BINARY_IMAGE);
+    let staged = dir.join(format!("{BINARY_IMAGE}.new"));
+    let backup = dir.join(format!("{BINARY_IMAGE}.old"));
+
+    let _ = fs::remove_file(&staged);
+    fs::write(&staged, bytes).map_err(|e| format!("Не удалось записать бинарник: {e}"))?;
+    let written = fs::metadata(&staged).map(|m| m.len()).unwrap_or(0);
+    if written != bytes.len() as u64 {
+        let _ = fs::remove_file(&staged);
+        return Err("Записанный бинарник повреждён — обновление отменено.".into());
+    }
+
     let _ = fs::remove_file(&backup);
     if binary.exists() {
         fs::rename(&binary, &backup).map_err(|e| format!("Не удалось заменить бинарник: {e}"))?;
     }
-    if let Err(e) = fs::write(&binary, bytes) {
-        // Roll back so a failed write never leaves the user without a proxy.
-        let _ = fs::remove_file(&binary);
+    if let Err(e) = fs::rename(&staged, &binary) {
+        let _ = fs::remove_file(&staged);
         if backup.exists() {
             let _ = fs::rename(&backup, &binary);
         }
-        return Err(format!("Не удалось записать бинарник: {e}"));
+        return Err(format!("Не удалось заменить бинарник: {e}"));
     }
     let _ = fs::remove_file(&backup);
     Ok(())
 }
 
-/// Downloads and installs the headless proxy binary. Returns its size.
-pub fn install_update(
-    app: &AppHandle,
-    url: &str,
-    version: &str,
-    digest: &str,
-) -> Result<u64, String> {
-    let expected = digest
+/// Restores the previous binary when an update was interrupted after the old
+/// one had been moved aside. Called before every start.
+fn recover_binary(dir: &Path) {
+    let binary = dir.join(BINARY_IMAGE);
+    let backup = dir.join(format!("{BINARY_IMAGE}.old"));
+    if !binary.exists() && backup.exists() {
+        let _ = fs::rename(&backup, &binary);
+    }
+    let _ = fs::remove_file(dir.join(format!("{BINARY_IMAGE}.new")));
+}
+
+/// Everything needed to install a release, resolved on the backend so the
+/// renderer cannot point the updater at an arbitrary executable.
+struct TgwsAsset {
+    url: String,
+    version: String,
+    digest: String,
+}
+
+fn resolve_asset(app: &AppHandle) -> Result<TgwsAsset, String> {
+    let info = check_update(app, false)?;
+    let url = info
+        .asset_url
+        .ok_or("Релиз прокси ещё не опубликован — скачивание недоступно.")?;
+    let version = info
+        .latest
+        .ok_or("В релизе прокси не указана версия — обновление отменено.")?;
+    let digest = info
+        .digest
+        .ok_or("В релизе нет SHA-256 — обновление отменено.")?;
+    Ok(TgwsAsset {
+        url,
+        version,
+        digest,
+    })
+}
+
+/// Downloads and installs the newest published proxy release. Returns its size.
+pub fn install_latest(app: &AppHandle) -> Result<u64, String> {
+    let asset = resolve_asset(app)?;
+    let expected = asset
+        .digest
         .trim()
         .strip_prefix("sha256:")
         .ok_or("Релиз не содержит SHA-256 — обновление отменено.")?
         .to_string();
 
+    let state = app.state::<AppState>();
+    let _guard = lock(&state.tgws.op);
     let was_running = status(app).state == TgwsState::Running;
-    {
-        let state = app.state::<AppState>();
-        let _guard = lock(&state.tgws.op);
-        stop_locked(app)?;
-    }
+
+    stop_locked(app)?;
     // Windows keeps a write lock on the running image even after taskkill
     // returns; kill by name and give the OS a moment.
     kill_image();
     std::thread::sleep(Duration::from_millis(300));
 
-    let bytes = download(url)?;
+    recover_binary(&config::tgws_dir());
+    let bytes = download(&asset.url)?;
     let actual = format!("{:x}", Sha256::digest(&bytes));
     if !actual.eq_ignore_ascii_case(expected.trim()) {
         return Err("Контрольная сумма бинарника не совпала — обновление отменено.".into());
     }
 
-    write_binary(&bytes)?;
+    write_binary(&config::tgws_dir(), &bytes)?;
 
     save_cfg(app, |cfg| {
-        cfg.installed_version = version.trim().to_string();
+        cfg.installed_version = asset.version.clone();
         cfg.dismissed_update_tag = String::new();
     })?;
 
-    {
-        let state = app.state::<AppState>();
-        *lock(&state.tgws.cache) = None;
-    }
+    *lock(&state.tgws.cache) = None;
     let _ = fs::remove_file(cache_path());
 
     set_status(app, |s| {
@@ -993,7 +1076,7 @@ pub fn install_update(
     });
 
     if was_running {
-        let _ = start(app);
+        start_locked(app)?;
     }
     Ok(bytes.len() as u64)
 }
@@ -1057,18 +1140,33 @@ mod tests {
 
     #[test]
     fn link_uses_fake_tls_secret_and_loopback() {
-        let link = link_for("127.0.0.1", 1443, "00112233445566778899aabbccddeeff");
+        let link = link_for("127.0.0.1", 1443, "00112233445566778899aabbccddeeff", "");
         assert_eq!(
             link,
             "tg://proxy?server=127.0.0.1&port=1443&secret=dd00112233445566778899aabbccddeeff"
         );
-        assert!(link_for("0.0.0.0", 1443, "aa").contains("server=127.0.0.1"));
-        assert!(link_for("::", 1443, "aa").contains("server=127.0.0.1"));
+        assert!(link_for("0.0.0.0", 1443, "aa", "").contains("server=127.0.0.1"));
+        assert!(link_for("::", 1443, "aa", "").contains("server=127.0.0.1"));
+    }
+
+    #[test]
+    fn link_switches_to_ee_with_fake_tls_domain() {
+        let link = link_for(
+            "127.0.0.1",
+            1443,
+            "00112233445566778899aabbccddeeff",
+            "example.com",
+        );
+        assert_eq!(
+            link,
+            "tg://proxy?server=127.0.0.1&port=1443&secret=ee00112233445566778899aabbccddeeff6578616d706c652e636f6d"
+        );
+        assert!(!link.contains("secret=dd"));
     }
 
     #[test]
     fn link_brackets_ipv6_hosts() {
-        let link = link_for("::1", 1443, "aa");
+        let link = link_for("::1", 1443, "aa", "");
         assert!(
             link.starts_with("tg://proxy?server=[::1]&port=1443"),
             "{link}"
@@ -1185,5 +1283,48 @@ mod tests {
         assert!(info_from(&cached, "1.11.2", "").has_update);
         assert!(info_from(&cached, "1.11.2-1", "1.11.2-1").dismissed);
         assert!(!info_from(&cached, "1.11.2-1", "1.11.2").dismissed);
+    }
+
+    fn temp_dir(name: &str) -> PathBuf {
+        let unique = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .map(|d| d.as_nanos())
+            .unwrap_or(0);
+        let dir = std::env::temp_dir().join(format!("zapret-ui-tgws-{name}-{unique}"));
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(&dir).unwrap();
+        dir
+    }
+
+    #[test]
+    fn binary_swap_replaces_the_file_without_leaving_a_backup() {
+        let dir = temp_dir("swap");
+        fs::write(dir.join(BINARY_IMAGE), b"old").unwrap();
+
+        write_binary(&dir, b"new-binary").unwrap();
+
+        assert_eq!(fs::read(dir.join(BINARY_IMAGE)).unwrap(), b"new-binary");
+        assert!(!dir.join(format!("{BINARY_IMAGE}.old")).exists());
+        assert!(!dir.join(format!("{BINARY_IMAGE}.new")).exists());
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn interrupted_swap_is_recovered_on_start() {
+        let dir = temp_dir("recover");
+        fs::write(dir.join(BINARY_IMAGE), b"previous").unwrap();
+        // Simulate a crash after "old -> .old" but before "new -> final".
+        fs::rename(
+            dir.join(BINARY_IMAGE),
+            dir.join(format!("{BINARY_IMAGE}.old")),
+        )
+        .unwrap();
+        fs::write(dir.join(format!("{BINARY_IMAGE}.new")), b"partial").unwrap();
+
+        recover_binary(&dir);
+
+        assert_eq!(fs::read(dir.join(BINARY_IMAGE)).unwrap(), b"previous");
+        assert!(!dir.join(format!("{BINARY_IMAGE}.new")).exists());
+        let _ = fs::remove_dir_all(&dir);
     }
 }
