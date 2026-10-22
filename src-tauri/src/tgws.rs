@@ -194,10 +194,30 @@ fn push_log(app: &AppHandle, line: String) {
         logs.push_back(line.clone());
     }
     if let Some(total) = parse_stats_total(&line) {
-        set_status(app, |s| s.client_connections = total);
+        note_client_connections(app, total);
+    } else if is_client_connected_event(&line) {
+        // The stats line is emitted once a minute; a real connection must be
+        // visible immediately (the hint and the UI depend on it).
+        note_client_connections(app, 1);
     }
     append_log_file(&line);
     let _ = app.emit("tgws-log", &line);
+}
+
+/// Raises the client counter without emitting a status event when nothing
+/// changed. Kept monotonic: stats lines and connection lines both feed it.
+fn note_client_connections(app: &AppHandle, total: u64) {
+    let state = app.state::<AppState>();
+    let current = lock(&state.tgws.status).client_connections;
+    if total > current {
+        set_status(app, |s| s.client_connections = total);
+    }
+}
+
+/// `[127.0.0.1:5013] DC2 -> WS pool hit` / `... DC203 -> trying CF proxy` is
+/// logged as soon as the proxy accepts a client, unlike the 60-second stats.
+fn is_client_connected_event(line: &str) -> bool {
+    line.contains("] DC") || line.contains("WS pool hit")
 }
 
 /// `stats: total=3 active=1 ...` — how many clients the proxy has accepted.
@@ -394,6 +414,11 @@ pub fn link(app: &AppHandle) -> Result<String, String> {
     Ok(link_for(&cfg.host, cfg.port, &secret, &cfg.fake_tls_domain))
 }
 
+/// The user opened the connection link manually; do not auto-open it again.
+pub fn mark_link_opened(app: &AppHandle) -> Result<(), String> {
+    save_cfg(app, |cfg| cfg.link_opened = true)
+}
+
 /// Replaces the secret with a fresh one and restarts a running proxy so the
 /// new `tg://` link becomes valid immediately.
 pub fn regenerate_secret(app: &AppHandle) -> Result<String, String> {
@@ -421,10 +446,12 @@ pub fn update_settings(
 ) -> Result<(), String> {
     let state = app.state::<AppState>();
     let _guard = lock(&state.tgws.op);
-    save_cfg(app, patch)?;
-    // A changed endpoint/secret invalidates the Telegram entry; allow the
-    // one-time "open link" hint to fire again.
-    save_cfg(app, |cfg| cfg.link_opened = false)?;
+    save_cfg(app, |cfg| {
+        patch(cfg);
+        // A changed endpoint/secret invalidates the Telegram entry; allow the
+        // one-time "open link" hint to fire again.
+        cfg.link_opened = false;
+    })?;
     if status(app).state == TgwsState::Running {
         stop_locked(app)?;
         std::thread::sleep(Duration::from_millis(300));
@@ -653,7 +680,11 @@ pub fn switch_to_free_port(app: &AppHandle) -> Result<u16, String> {
 
     save_cfg(app, |c| {
         c.port = port;
+        c.link_opened = false;
     })?;
+    // A running proxy still holds the old port; restart it so the config, the
+    // link and the process agree.
+    stop_locked(app)?;
     set_status(app, |s| s.port_conflict = false);
     start_locked(app)?;
     Ok(port)
@@ -1494,6 +1525,20 @@ mod tests {
         assert_eq!(parse_stats_total(line), Some(7));
         assert_eq!(parse_stats_total("no stats here"), None);
         assert_eq!(parse_stats_total("stats: active=1"), None);
+    }
+
+    #[test]
+    fn connection_events_are_recognised() {
+        assert!(is_client_connected_event(
+            "01:17:07  INFO   [127.0.0.1:5013] DC2 -> WS pool hit"
+        ));
+        assert!(is_client_connected_event(
+            "01:17:07  INFO   [127.0.0.1:5008] DC203 -> trying CF proxy"
+        ));
+        assert!(!is_client_connected_event(
+            "01:17:07  WARNING  [127.0.0.1:5009] bad handshake (wrong secret or proto)"
+        ));
+        assert!(!is_client_connected_event("stats: total=0 active=0"));
     }
 
     #[test]

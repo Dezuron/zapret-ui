@@ -39,6 +39,7 @@ import {
   updateInfo,
 } from "../store";
 import { tgwsEndpoint, tgwsVersionLabel } from "../lib/tgws";
+import { toast } from "../lib/toast";
 
 const router = useRouter();
 
@@ -78,7 +79,17 @@ const telegramHint = computed(() => {
 
 async function checkAllUpdates() {
   if (checkingAllUpdates.value || benchRunning.value) return;
-  await Promise.all([checkAppUpdate(false), checkUpdate(false), checkTgwsUpdate(false, true)]);
+  await Promise.all([checkAppUpdate(true), checkUpdate(true), checkTgwsUpdate(true, true)]);
+
+  const updates: string[] = [];
+  if (appUpdate.value?.available) updates.push(`приложение ${appUpdate.value.latest}`);
+  if (updateInfo.value?.update_available) {
+    updates.push(`flowseal-zapret ${updateInfo.value.latest}`);
+  }
+  if (tgwsUpdate.value?.has_update && tgwsUpdate.value.latest) {
+    updates.push(`Telegram-прокси ${tgwsUpdate.value.latest}`);
+  }
+  toast("info", updates.length ? `Доступны обновления: ${updates.join(", ")}.` : "Обновлений нет.");
 }
 </script>
 
