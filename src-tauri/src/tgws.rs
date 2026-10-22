@@ -1398,7 +1398,7 @@ mod tests {
         assert!(args
             .windows(2)
             .any(|w| w[0] == "--host" && w[1] == "127.0.0.1"));
-        assert!(args.windows(2).any(|w| w[0] == "--port" && w[1] == "1443"));
+        assert!(args.windows(2).any(|w| w[0] == "--port" && w[1] == "1555"));
         assert!(args
             .windows(2)
             .any(|w| w[0] == "--secret" && w[1] == secret));

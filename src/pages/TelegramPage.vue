@@ -56,7 +56,7 @@ import {
 } from "../store";
 
 const hostDraft = ref("");
-const portDraft = ref(1443);
+const portDraft = ref(1555);
 const secretDraft = ref("");
 const logsOpen = ref(false);
 const logBox = ref<HTMLElement | null>(null);
@@ -115,7 +115,7 @@ async function commitPort() {
   try {
     portDraft.value = await setTgwsPort(value);
   } catch {
-    portDraft.value = config.value?.tgws.port ?? 1443;
+    portDraft.value = config.value?.tgws.port ?? 1555;
   }
 }
 

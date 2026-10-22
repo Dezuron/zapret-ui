@@ -86,7 +86,8 @@ impl Default for TgwsConfig {
         Self {
             autostart: true,
             host: "127.0.0.1".into(),
-            port: 1443,
+            // 1443 is the tg-ws-proxy convention; keep ours out of its way.
+            port: 1555,
             secret: String::new(),
             dc_ip: vec!["2:149.154.167.220".into(), "4:149.154.167.220".into()],
             buf_kb: 256,

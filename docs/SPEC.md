@@ -335,7 +335,8 @@
 - **Хранение:** `%LOCALAPPDATA%\zapret-ui\tgws\tgws-cli.exe` — вне `runtime\`, иначе
   обновление zapret снесло бы прокси. Лог `tgws.log` с ротацией 5 МБ × 1.
 - **Конфиг** (`config.json`, секция `tgws`, все поля `#[serde(default)]`):
-  `autostart` (по умолчанию `true`), `host` (`127.0.0.1`), `port` (1443), `secret` (32 hex,
+  `autostart` (по умолчанию `true`), `host` (`127.0.0.1`), `port` (1555; при миграции
+  с внешнего TgWsProxy может остаться его порт, обычно 1443), `secret` (32 hex,
   генерируется лениво при первом обращении), `dc_ip`, `buf_kb`, `pool_size`, `cfproxy`,
   `h2`, `cfproxy_user_domain`, `fake_tls_domain`, `verbose`, `installed_version`,
   `dismissed_update_tag`. В UI редактируются только host/port/secret; остальное — руками.

@@ -41,7 +41,7 @@ describe("tgwsEndpoint", () => {
     expect(tgwsEndpoint("127.0.0.1", 1443)).toBe("127.0.0.1:1443");
     expect(tgwsEndpoint("0.0.0.0", 1443)).toBe("127.0.0.1:1443");
     expect(tgwsEndpoint("::1", 1443)).toBe("[::1]:1443");
-    expect(tgwsEndpoint(undefined, undefined)).toBe("127.0.0.1:1443");
+    expect(tgwsEndpoint(undefined, undefined)).toBe("127.0.0.1:1555");
   });
 });
 
