@@ -144,11 +144,15 @@ pub fn open_tgws_log() -> AppResult<()> {
 
 /// Opens a `tg://proxy` link with the registered Telegram handler.
 #[tauri::command]
-pub fn open_telegram_link(url: String) -> AppResult<()> {
+pub fn open_telegram_link(app: tauri::AppHandle, url: String) -> AppResult<()> {
     if !url.starts_with("tg://proxy?") {
         return Err("Разрешены только ссылки tg://proxy.".into());
     }
-    Ok(crate::sys::open_path(Path::new(&url))?)
+    crate::sys::open_path(Path::new(&url))?;
+    // The link has been shown to the user; the automatic hint must not pop up
+    // a second dialog later in this session.
+    let _ = tgws::mark_link_opened(&app);
+    Ok(())
 }
 
 #[tauri::command]

@@ -13,12 +13,14 @@ import {
   appUpdate,
   appVersion,
   applyAppUpdate,
+  applyTgwsUpdate,
   applyUpdate,
   benchDate,
   benchSummary,
   benchRunning,
   busy,
   checkAppUpdate,
+  checkTgwsUpdate,
   checkUpdate,
   checkingAppUpdate,
   checkingUpdate,
@@ -27,14 +29,17 @@ import {
   runtimeReady,
   status,
   tgwsBusy,
+  tgwsChecking,
   tgwsRunning,
   tgwsStateText,
   tgwsStatus,
+  tgwsUpdate,
   toggleStart,
   toggleTgws,
   updateInfo,
 } from "../store";
 import { tgwsEndpoint, tgwsVersionLabel } from "../lib/tgws";
+import { toast } from "../lib/toast";
 
 const router = useRouter();
 
@@ -51,7 +56,11 @@ const bestScore = computed(() => {
 
 const appHasUpdate = computed(() => !!appUpdate.value?.available);
 const zapretHasUpdate = computed(() => !!updateInfo.value?.update_available);
-const checkingAllUpdates = computed(() => checkingAppUpdate.value || checkingUpdate.value);
+const tgwsHasUpdate = computed(() => !!tgwsUpdate.value?.has_update);
+const checkingAllUpdates = computed(
+  () => checkingAppUpdate.value || checkingUpdate.value || tgwsChecking.value,
+);
+
 const telegramEndpoint = computed(() =>
   tgwsEndpoint(config.value?.tgws.host, config.value?.tgws.port),
 );
@@ -61,10 +70,37 @@ const telegramVersion = computed(() =>
     tgwsStatus.value?.binary_present,
   ),
 );
+const telegramHint = computed(() => {
+  if (!tgwsRunning.value) return tgwsStateText.value;
+  return (tgwsStatus.value?.client_connections_total ?? 0) > 0
+    ? "Прокси включён"
+    : "Прокси включён · Telegram не подключён";
+});
 
 async function checkAllUpdates() {
   if (checkingAllUpdates.value || benchRunning.value) return;
-  await Promise.all([checkAppUpdate(false), checkUpdate(false)]);
+  const results = await Promise.all([
+    checkAppUpdate(true),
+    checkUpdate(true),
+    checkTgwsUpdate(true, true),
+  ]);
+  if (results.some((ok) => !ok)) {
+    toast("warning", "Не удалось проверить все обновления — проверьте сеть.");
+    return;
+  }
+
+  const updates: string[] = [];
+  if (appUpdate.value?.available) updates.push(`приложение ${appUpdate.value.latest}`);
+  if (updateInfo.value?.update_available) {
+    updates.push(`flowseal-zapret ${updateInfo.value.latest}`);
+  }
+  if (tgwsUpdate.value?.has_update && tgwsUpdate.value.latest) {
+    updates.push(`Telegram-прокси ${tgwsUpdate.value.latest}`);
+  }
+  toast(
+    updates.length ? "success" : "info",
+    updates.length ? `Доступны обновления: ${updates.join(", ")}.` : "Обновлений нет.",
+  );
 }
 </script>
 
@@ -121,7 +157,7 @@ async function checkAllUpdates() {
           <div class="power-icon telegram"><Send :size="19" /></div>
           <div class="power-heading">
             <CardTitle>Telegram</CardTitle>
-            <CardDescription>{{ tgwsStateText }}</CardDescription>
+            <CardDescription>{{ telegramHint }}</CardDescription>
           </div>
           <Switch
             :model-value="tgwsRunning"
@@ -229,6 +265,36 @@ async function checkAllUpdates() {
               @click="checkUpdate(false)"
             >
               {{ checkingUpdate ? "Проверка…" : "Проверить" }}
+            </button>
+          </div>
+        </div>
+
+        <div class="update-row">
+          <div>
+            <span class="update-name">Telegram WS-прокси</span>
+            <strong class="update-version">{{ telegramVersion }}</strong>
+          </div>
+          <div class="update-actions">
+            <span v-if="tgwsHasUpdate" class="update-available">
+              Доступно {{ tgwsUpdate?.latest }}
+            </span>
+            <button
+              v-if="tgwsHasUpdate"
+              class="btn small primary"
+              type="button"
+              :disabled="tgwsBusy"
+              @click="applyTgwsUpdate"
+            >
+              Обновить
+            </button>
+            <button
+              v-else
+              class="btn small"
+              type="button"
+              :disabled="tgwsChecking"
+              @click="checkTgwsUpdate(false, true)"
+            >
+              {{ tgwsChecking ? "Проверка…" : "Проверить" }}
             </button>
           </div>
         </div>

@@ -76,6 +76,9 @@ pub struct TgwsConfig {
     /// One-time migration flag: the secret/port may be inherited from a
     /// standalone TgWsProxy install, so the Telegram entry keeps working.
     pub secret_migrated: bool,
+    /// The `tg://` link was opened automatically once after the first start;
+    /// prevents nagging the user on every launch.
+    pub link_opened: bool,
 }
 
 impl Default for TgwsConfig {
@@ -83,7 +86,8 @@ impl Default for TgwsConfig {
         Self {
             autostart: true,
             host: "127.0.0.1".into(),
-            port: 1443,
+            // 1443 is the tg-ws-proxy convention; keep ours out of its way.
+            port: 1555,
             secret: String::new(),
             dc_ip: vec!["2:149.154.167.220".into(), "4:149.154.167.220".into()],
             buf_kb: 256,
@@ -96,6 +100,7 @@ impl Default for TgwsConfig {
             installed_version: String::new(),
             dismissed_update_tag: String::new(),
             secret_migrated: false,
+            link_opened: false,
         }
     }
 }

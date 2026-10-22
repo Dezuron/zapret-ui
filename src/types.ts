@@ -54,6 +54,7 @@ export interface TgwsStatus {
   installed_version: string;
   binary_present: boolean;
   port_conflict: boolean;
+  client_connections_total: number;
 }
 
 export interface TgwsNotice {

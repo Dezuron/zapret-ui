@@ -56,7 +56,7 @@ import {
 } from "../store";
 
 const hostDraft = ref("");
-const portDraft = ref(1443);
+const portDraft = ref(1555);
 const secretDraft = ref("");
 const logsOpen = ref(false);
 const logBox = ref<HTMLElement | null>(null);
@@ -115,7 +115,7 @@ async function commitPort() {
   try {
     portDraft.value = await setTgwsPort(value);
   } catch {
-    portDraft.value = config.value?.tgws.port ?? 1443;
+    portDraft.value = config.value?.tgws.port ?? 1555;
   }
 }
 
@@ -208,6 +208,23 @@ async function commitSecret() {
           </div>
         </div>
       </CardContent>
+    </Card>
+
+    <Card
+      v-if="tgwsRunning && (tgwsStatus?.client_connections_total ?? 0) === 0"
+      class="tgws-card tgws-connect-hint"
+    >
+      <AlertTriangle :size="18" />
+      <div class="tgws-connect-hint-text">
+        <strong>Telegram ещё не использует прокси</strong>
+        <span>
+          В Telegram выберите «Использовать собственный прокси» и добавьте ссылку ниже — проще всего
+          кнопкой «Подключить Telegram»: ключ и порт уже верные, менять ничего не нужно.
+        </span>
+      </div>
+      <Button size="sm" :disabled="!tgwsLink" @click="openTgwsInTelegram">
+        Подключить Telegram
+      </Button>
     </Card>
 
     <Card v-if="tgwsHasUpdate && tgwsUpdate?.latest" class="tgws-card tgws-update">
@@ -380,6 +397,35 @@ async function commitSecret() {
     0 18px 50px var(--glass-shadow),
     inset 0 1px 0 var(--glass-highlight);
   backdrop-filter: blur(18px) saturate(135%);
+}
+
+/* The proxy is running, but no Telegram client has connected yet. */
+.tgws-connect-hint {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 14px 16px;
+  border-color: color-mix(in oklab, var(--warn) 45%, transparent);
+  background: var(--warn-soft);
+  color: var(--warn);
+}
+
+.tgws-connect-hint-text {
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.tgws-connect-hint-text strong {
+  font-size: 12.5px;
+}
+
+.tgws-connect-hint-text span {
+  color: var(--text-2);
+  font-size: 11.5px;
+  line-height: 1.45;
 }
 
 .tgws-hero-head {

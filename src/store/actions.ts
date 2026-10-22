@@ -383,8 +383,8 @@ export async function deleteGenerated(name: string) {
   }
 }
 
-export async function checkUpdate(silent = true) {
-  if (checkingUpdate.value) return;
+export async function checkUpdate(silent = true): Promise<boolean> {
+  if (checkingUpdate.value) return false;
   checkingUpdate.value = true;
   try {
     updateInfo.value = await invoke<UpdateInfo>("check_update");
@@ -393,17 +393,19 @@ export async function checkUpdate(silent = true) {
     } else if (!silent) {
       toast("info", "Обновлений flowseal-zapret нет.");
     }
+    return true;
   } catch (error) {
     if (!silent) {
       toast("error", String(error));
     }
+    return false;
   } finally {
     checkingUpdate.value = false;
   }
 }
 
-export async function checkAppUpdate(silent = true) {
-  if (checkingAppUpdate.value) return;
+export async function checkAppUpdate(silent = true): Promise<boolean> {
+  if (checkingAppUpdate.value) return false;
   checkingAppUpdate.value = true;
   try {
     const info = await invoke<AppUpdateInfo | null>("check_app_update");
@@ -413,12 +415,14 @@ export async function checkAppUpdate(silent = true) {
     } else if (!silent) {
       toast("info", "Обновлений приложения нет.");
     }
+    return true;
   } catch (error) {
     // A private repository or a missing release is reported as "no update";
     // a silent startup check must not spam the user with network errors.
     if (!silent) {
       toast("error", String(error));
     }
+    return false;
   } finally {
     checkingAppUpdate.value = false;
   }
@@ -671,8 +675,8 @@ async function refreshTgwsLink() {
   }
 }
 
-export async function checkTgwsUpdate(silent = true, force = false) {
-  if (tgwsChecking.value) return;
+export async function checkTgwsUpdate(silent = true, force = false): Promise<boolean> {
+  if (tgwsChecking.value) return false;
   tgwsChecking.value = true;
   try {
     const info = await invoke<TgwsUpdateInfo>("check_tgws_update", { force });
@@ -687,8 +691,10 @@ export async function checkTgwsUpdate(silent = true, force = false) {
           : "Обновлений Telegram-прокси нет.",
       );
     }
+    return true;
   } catch (error) {
     if (!silent) toast("error", String(error));
+    return false;
   } finally {
     tgwsChecking.value = false;
   }

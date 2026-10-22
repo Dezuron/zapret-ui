@@ -49,7 +49,7 @@ export function displayHost(host: string | undefined): string {
 export function tgwsEndpoint(host: string | undefined, port: number | undefined): string {
   const value = displayHost(host);
   const rendered = value.includes(":") && !value.startsWith("[") ? `[${value}]` : value;
-  return `${rendered}:${port ?? 1443}`;
+  return `${rendered}:${port ?? 1555}`;
 }
 
 /** Version shown for the proxy binary: tag, "вручную" or "не установлен". */
