@@ -31,6 +31,8 @@ const REPO: &str = "Dezuron/tgws-cli";
 const ASSET_NAME: &str = "tgws-cli-windows-x64.exe";
 /// Image name of our own binary; only this image is ever killed by name.
 const BINARY_IMAGE: &str = "tgws-cli.exe";
+/// Standalone Flowseal tray app that occupies the same default port.
+const STANDALONE_IMAGE: &str = "TgWsProxy_windows.exe";
 
 const LOG_LINES: usize = 300;
 const LOG_MAX_BYTES: u64 = 5 * 1024 * 1024;
@@ -253,15 +255,89 @@ fn generate_secret() -> Result<String, String> {
     Ok(bytes.iter().map(|b| format!("{b:02x}")).collect())
 }
 
+/// Standalone TgWsProxy settings, used only for the one-time migration.
+struct StandaloneConfig {
+    host: Option<String>,
+    port: Option<u16>,
+    secret: String,
+}
+
+/// Reads `%APPDATA%\TgWsProxy\config.json` written by a standalone
+/// [Flowseal/tg-ws-proxy] install. When such an install exists, its port and
+/// secret are already configured in Telegram, so inheriting them makes the
+/// switch to the built-in proxy seamless.
+fn read_standalone_config() -> Option<StandaloneConfig> {
+    let path = dirs::config_dir()?.join("TgWsProxy").join("config.json");
+    let text = fs::read_to_string(path).ok()?;
+    let value: serde_json::Value = serde_json::from_str(&text).ok()?;
+    let secret = value.get("secret")?.as_str()?.trim().to_string();
+    if !is_valid_secret(&secret) {
+        return None;
+    }
+    Some(StandaloneConfig {
+        host: value
+            .get("host")
+            .and_then(|v| v.as_str())
+            .map(str::to_string),
+        port: value
+            .get("port")
+            .and_then(|v| v.as_u64())
+            .and_then(|p| u16::try_from(p).ok()),
+        secret,
+    })
+}
+
 /// Returns the persisted secret, generating and saving one when missing or
 /// malformed (a hand-edited config must not brick the proxy).
+///
+/// On the first run after installing zapret-ui, a standalone TgWsProxy config
+/// is inherited instead of generating a fresh secret: Telegram already holds
+/// that secret for `127.0.0.1:1443`, so the user does not have to re-add the
+/// proxy after migrating.
 pub fn ensure_secret(app: &AppHandle) -> Result<String, String> {
+    let cfg = load_cfg(app);
+    if cfg.secret_migrated {
+        if is_valid_secret(&cfg.secret) {
+            return Ok(cfg.secret);
+        }
+        let fresh = generate_secret()?;
+        save_cfg(app, |c| c.secret = fresh.clone())?;
+        return Ok(fresh);
+    }
+
+    if let Some(standalone) = read_standalone_config() {
+        let secret = standalone.secret.clone();
+        let host = standalone
+            .host
+            .as_deref()
+            .and_then(|h| validate_host(h).ok());
+        let port = standalone.port.filter(|p| (1024..=65535).contains(p));
+        save_cfg(app, |c| {
+            c.secret = secret.clone();
+            if let Some(host) = host.clone() {
+                c.host = host;
+            }
+            if let Some(port) = port {
+                c.port = port;
+            }
+            c.secret_migrated = true;
+        })?;
+        emit_notice(
+            app,
+            true,
+            "Ключ и адрес взяты из установленного TgWsProxy — ссылка в Telegram остаётся рабочей.",
+        );
+        return Ok(secret);
+    }
+
+    // Nothing to inherit: mark the migration done and keep/generate a secret.
+    save_cfg(app, |c| c.secret_migrated = true)?;
     let current = load_cfg(app).secret;
     if is_valid_secret(&current) {
         return Ok(current);
     }
     let fresh = generate_secret()?;
-    save_cfg(app, |cfg| cfg.secret = fresh.clone())?;
+    save_cfg(app, |c| c.secret = fresh.clone())?;
     Ok(fresh)
 }
 
@@ -430,6 +506,49 @@ fn kill_image() {
         .status();
 }
 
+fn kill_named_image(image: &str) {
+    let _ = sys::command("taskkill.exe")
+        .args(["/F", "/IM", image])
+        .status();
+}
+
+/// PID of the process listening on `port`, parsed from `netstat -ano`.
+fn port_owner_pid(port: u16) -> Option<u32> {
+    let output = sys::command("netstat.exe").args(["-ano"]).output().ok()?;
+    let text = String::from_utf8_lossy(&output.stdout);
+    let suffix = format!(":{port}");
+    for line in text.lines() {
+        let columns: Vec<&str> = line.split_whitespace().collect();
+        if columns.len() < 5 || columns[0] != "TCP" {
+            continue;
+        }
+        if !columns[1].ends_with(&suffix) || columns[3] != "LISTENING" {
+            continue;
+        }
+        if let Ok(pid) = columns[4].parse::<u32>() {
+            return Some(pid);
+        }
+    }
+    None
+}
+
+/// Image name for a PID, parsed from `tasklist` CSV output.
+fn process_image(pid: u32) -> Option<String> {
+    let filter = format!("PID eq {pid}");
+    let output = sys::command("tasklist.exe")
+        .args(["/FI", &filter, "/FO", "CSV", "/NH"])
+        .output()
+        .ok()?;
+    let text = String::from_utf8_lossy(&output.stdout);
+    let first = text.lines().next()?.trim();
+    let name = first.split(',').next()?.trim().trim_matches('"');
+    if name.is_empty() || name.eq_ignore_ascii_case("INFO:") {
+        None
+    } else {
+        Some(name.to_string())
+    }
+}
+
 fn port_available(host: &str, port: u16) -> bool {
     TcpListener::bind((host, port)).is_ok()
 }
@@ -461,12 +580,39 @@ fn ensure_port_free(app: &AppHandle, cfg: &config::TgwsConfig) -> Result<(), Str
     if port_available(&cfg.host, cfg.port) {
         return Ok(());
     }
+
+    // The standalone Flowseal tray app uses the same default port. Slipgate
+    // solves this by killing it and taking the port; we do the same, but only
+    // for that exact image. The secret was inherited from its config on the
+    // first run, so the Telegram entry keeps working.
+    let owner = port_owner_pid(cfg.port).and_then(process_image);
+    if owner
+        .as_deref()
+        .map(|name| name.eq_ignore_ascii_case(STANDALONE_IMAGE))
+        .unwrap_or(false)
+    {
+        kill_named_image(STANDALONE_IMAGE);
+        std::thread::sleep(Duration::from_millis(800));
+        if port_available(&cfg.host, cfg.port) {
+            emit_notice(
+                app,
+                true,
+                format!(
+                    "Остановлен внешний TgWsProxy: порт {} теперь у встроенного прокси.",
+                    cfg.port
+                ),
+            );
+            return Ok(());
+        }
+    }
+
     set_status(app, |s| s.port_conflict = true);
+    let owner_hint = owner.map(|name| format!(" ({name})")).unwrap_or_default();
     Err(mark_failed(
         app,
         format!(
-            "Порт {} занят другим приложением. Укажите другой порт в параметрах или займите соседний.",
-            cfg.port
+            "Порт {}{} занят другим приложением. Занять соседний свободный порт или укажите его в параметрах.",
+            cfg.port, owner_hint
         ),
     ))
 }
@@ -525,8 +671,11 @@ fn start_locked(app: &AppHandle) -> Result<(), String> {
         ));
     }
 
+    // Ensure the secret first: the one-time migration may also change the
+    // host/port inherited from a standalone TgWsProxy, so reload the config.
+    let secret = ensure_secret(app)?;
     let mut cfg = load_cfg(app);
-    cfg.secret = ensure_secret(app)?;
+    cfg.secret = secret;
 
     set_status(app, |s| {
         s.state = TgwsState::Starting;

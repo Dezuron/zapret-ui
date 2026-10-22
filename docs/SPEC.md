@@ -339,16 +339,21 @@
   генерируется лениво при первом обращении), `dc_ip`, `buf_kb`, `pool_size`, `cfproxy`,
   `h2`, `cfproxy_user_domain`, `fake_tls_domain`, `verbose`, `installed_version`,
   `dismissed_update_tag`. В UI редактируются только host/port/secret; остальное — руками.
+  При первом запуске (`secret_migrated = false`) ключ и адрес наследуются из
+  `%APPDATA%\TgWsProxy\config.json`, если там стоял внешний TgWsProxy: Telegram уже
+  хранит этот ключ, поэтому повторно добавлять прокси не нужно.
 - **Аргументы процесса:** `--host --port --secret --dc-ip… --buf-kb --pool-size [-v]
   [--no-cfproxy] [--no-h2] [--cfproxy-domain] [--fake-tls-domain]`. Секрет виден в списке
   процессов (как и у upstream) — принимаем: тот же пользователь, локальный процесс.
 - **Супервизор** (`src-tauri/src/tgws.rs`): мьютекс на start/stop/restart; пред-проверка
-  порта (`TcpListener::bind`), при занятости — `taskkill /F /T /IM tgws-cli.exe` (только
-  свой образ), повторная проверка и `port_conflict = true` в статусе (UI предлагает
-  «Занять свободный порт» → `switch_to_free_port`); spawn с `CREATE_NO_WINDOW`;
-  stdout+stderr читаются в кольцевой буфер (300 строк) и файл, строки с секретом маскируются;
-  через 700 мс проверяется, что процесс жив → `running`; стоп — `taskkill /F /T /PID` и
-  ожидание exit до 3 с.
+  порта (`TcpListener::bind`). Если порт занят: сначала убивается свой `tgws-cli.exe`;
+  затем определяется владелец через `netstat -ano` + `tasklist` — если это
+  `TgWsProxy_windows.exe`, он останавливается и порт занимается (поведение Slipgate,
+  ключ уже унаследован); для любого другого процесса статус получает `port_conflict`,
+  а UI предлагает «Занять свободный порт» (`switch_to_free_port`). Далее spawn с
+  `CREATE_NO_WINDOW`; stdout+stderr читаются в кольцевой буфер (300 строк) и файл, строки
+  с секретом маскируются; через 700 мс проверяется, что процесс жив → `running`;
+  стоп — `taskkill /F /T /PID` и ожидание exit до 3 с.
 - **Статусы:** `stopped | starting | running | stopping | error | not_installed`; эмитятся
   событием `tgws-status`, строки лога — `tgws-log`.
 - **Ссылка:** `tg://proxy?server=<host>&port=<port>&secret=dd<secret>`; если в конфиге задан
