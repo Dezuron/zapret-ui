@@ -211,7 +211,7 @@ async function commitSecret() {
     </Card>
 
     <Card
-      v-if="tgwsRunning && (tgwsStatus?.client_connections ?? 0) === 0"
+      v-if="tgwsRunning && (tgwsStatus?.client_connections_total ?? 0) === 0"
       class="tgws-card tgws-connect-hint"
     >
       <AlertTriangle :size="18" />

@@ -356,13 +356,13 @@
   с секретом маскируются; через 700 мс проверяется, что процесс жив → `running`;
   стоп — `taskkill /F /T /PID` и ожидание exit до 3 с.
 - **Статусы:** `stopped | starting | running | stopping | error | not_installed`; эмитятся
-  событием `tgws-status`, строки лога — `tgws-log`. В статусе есть `client_connections`
+  событием `tgws-status`, строки лога — `tgws-log`. В статусе есть `client_connections_total`
   (обновляется и по строке `stats: total=N`, и по событию подключения `] DC` / `WS pool hit`,
   чтобы UI не ждал минутного статистического отчёта), `port_conflict` и признак наличия
   бинарника.
 - **Подключение Telegram:** у Telegram нет API для настройки MTProto-прокси, поэтому
   приложение не может включить его молча. Если прокси запущен, а клиентских подключений нет
-  (`client_connections = 0`), страница показывает подсказку с кнопкой «Подключить Telegram»;
+  (`client_connections_total = 0`), страница показывает подсказку с кнопкой «Подключить Telegram»;
   при первом запуске (`link_opened = false`) приложение один раз само открывает `tg://`-ссылку —
   пользователь подтверждает добавление в Telegram одним нажатием.
 - **Ссылка:** `tg://proxy?server=<host>&port=<port>&secret=dd<secret>`; если в конфиге задан

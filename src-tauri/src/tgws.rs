@@ -63,8 +63,9 @@ pub struct TgwsStatus {
     /// True when the last start failed because the configured port is taken by
     /// a foreign process; the UI then offers a one-click fallback port.
     pub port_conflict: bool,
-    /// Connections accepted from a Telegram client (parsed from proxy stats).
-    pub client_connections: u64,
+    /// Total connections accepted from a Telegram client since the proxy
+    /// started (monotonic; parsed from proxy stats and connection events).
+    pub client_connections_total: u64,
 }
 
 /// Runtime state of the supervisor, stored in [`AppState`].
@@ -95,7 +96,7 @@ impl Tgws {
                 installed_version: String::new(),
                 binary_present: false,
                 port_conflict: false,
-                client_connections: 0,
+                client_connections_total: 0,
             }),
             logs: Mutex::new(VecDeque::new()),
             op: Mutex::new(()),
@@ -208,9 +209,13 @@ fn push_log(app: &AppHandle, line: String) {
 /// changed. Kept monotonic: stats lines and connection lines both feed it.
 fn note_client_connections(app: &AppHandle, total: u64) {
     let state = app.state::<AppState>();
-    let current = lock(&state.tgws.status).client_connections;
+    let current = lock(&state.tgws.status).client_connections_total;
     if total > current {
-        set_status(app, |s| s.client_connections = total);
+        // `max` inside the lock closes the race with a concurrent stats line:
+        // this closure can never lower the counter.
+        set_status(app, |s| {
+            s.client_connections_total = s.client_connections_total.max(total)
+        });
     }
 }
 
@@ -675,8 +680,10 @@ pub fn switch_to_free_port(app: &AppHandle) -> Result<u16, String> {
     let _guard = lock(&state.tgws.op);
 
     let cfg = load_cfg(app);
+    let previous_port = cfg.port;
     let port = next_free_port(&cfg.host, cfg.port, 20)
         .ok_or("Рядом нет свободного порта — укажите его в параметрах.")?;
+    let was_running = status(app).state == TgwsState::Running;
 
     save_cfg(app, |c| {
         c.port = port;
@@ -686,7 +693,14 @@ pub fn switch_to_free_port(app: &AppHandle) -> Result<u16, String> {
     // link and the process agree.
     stop_locked(app)?;
     set_status(app, |s| s.port_conflict = false);
-    start_locked(app)?;
+    if let Err(error) = start_locked(app) {
+        // Never leave the config pointing at a port where nothing listens.
+        let _ = save_cfg(app, |c| c.port = previous_port);
+        if was_running {
+            let _ = start_locked(app);
+        }
+        return Err(error);
+    }
     Ok(port)
 }
 
@@ -809,7 +823,7 @@ fn start_locked(app: &AppHandle) -> Result<(), String> {
         s.pid = Some(pid);
         s.last_error = None;
         s.port_conflict = false;
-        s.client_connections = 0;
+        s.client_connections_total = 0;
     });
     spawn_watcher(app.clone(), pid);
     schedule_connect_hint(app.clone());
@@ -823,7 +837,7 @@ fn schedule_connect_hint(app: AppHandle) {
     std::thread::spawn(move || {
         std::thread::sleep(Duration::from_secs(20));
         let snapshot = status(&app);
-        if snapshot.state != TgwsState::Running || snapshot.client_connections > 0 {
+        if snapshot.state != TgwsState::Running || snapshot.client_connections_total > 0 {
             return;
         }
         if load_cfg(&app).link_opened {

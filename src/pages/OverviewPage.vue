@@ -72,14 +72,22 @@ const telegramVersion = computed(() =>
 );
 const telegramHint = computed(() => {
   if (!tgwsRunning.value) return tgwsStateText.value;
-  return (tgwsStatus.value?.client_connections ?? 0) > 0
+  return (tgwsStatus.value?.client_connections_total ?? 0) > 0
     ? "Прокси включён"
     : "Прокси включён · Telegram не подключён";
 });
 
 async function checkAllUpdates() {
   if (checkingAllUpdates.value || benchRunning.value) return;
-  await Promise.all([checkAppUpdate(true), checkUpdate(true), checkTgwsUpdate(true, true)]);
+  const results = await Promise.all([
+    checkAppUpdate(true),
+    checkUpdate(true),
+    checkTgwsUpdate(true, true),
+  ]);
+  if (results.some((ok) => !ok)) {
+    toast("warning", "Не удалось проверить все обновления — проверьте сеть.");
+    return;
+  }
 
   const updates: string[] = [];
   if (appUpdate.value?.available) updates.push(`приложение ${appUpdate.value.latest}`);
@@ -89,7 +97,10 @@ async function checkAllUpdates() {
   if (tgwsUpdate.value?.has_update && tgwsUpdate.value.latest) {
     updates.push(`Telegram-прокси ${tgwsUpdate.value.latest}`);
   }
-  toast("info", updates.length ? `Доступны обновления: ${updates.join(", ")}.` : "Обновлений нет.");
+  toast(
+    updates.length ? "success" : "info",
+    updates.length ? `Доступны обновления: ${updates.join(", ")}.` : "Обновлений нет.",
+  );
 }
 </script>
 
