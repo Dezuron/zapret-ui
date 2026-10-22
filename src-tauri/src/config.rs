@@ -42,6 +42,60 @@ impl GameFilter {
     }
 }
 
+/// Settings of the bundled Telegram MTProto-over-WebSocket proxy
+/// (headless build of Flowseal/tg-ws-proxy).
+///
+/// Only `host`, `port` and `secret` are edited from the UI; every other field
+/// mirrors an upstream CLI flag and is meant to be tuned by hand in
+/// `config.json`.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
+pub struct TgwsConfig {
+    /// Start the proxy together with the application.
+    pub autostart: bool,
+    pub host: String,
+    /// `0` is never valid: the app validates the range before saving.
+    pub port: u16,
+    /// 32 hex characters (MTProto secret). Generated on first use.
+    pub secret: String,
+    /// Telegram datacenter redirects, e.g. `2:149.154.167.220`.
+    pub dc_ip: Vec<String>,
+    pub buf_kb: u32,
+    /// Ready WebSocket connections per DC. `0` disables the direct DC route.
+    pub pool_size: u32,
+    pub cfproxy: bool,
+    pub h2: bool,
+    pub cfproxy_user_domain: String,
+    pub fake_tls_domain: String,
+    pub verbose: bool,
+    /// Version tag of the installed headless binary (`1.11.2-1`), empty when
+    /// the binary was placed manually.
+    pub installed_version: String,
+    /// Release tag the user dismissed with "Позже".
+    pub dismissed_update_tag: String,
+}
+
+impl Default for TgwsConfig {
+    fn default() -> Self {
+        Self {
+            autostart: true,
+            host: "127.0.0.1".into(),
+            port: 1443,
+            secret: String::new(),
+            dc_ip: vec!["2:149.154.167.220".into(), "4:149.154.167.220".into()],
+            buf_kb: 256,
+            pool_size: 4,
+            cfproxy: true,
+            h2: true,
+            cfproxy_user_domain: String::new(),
+            fake_tls_domain: String::new(),
+            verbose: false,
+            installed_version: String::new(),
+            dismissed_update_tag: String::new(),
+        }
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(default)]
 pub struct AppConfig {
@@ -64,6 +118,7 @@ pub struct AppConfig {
     pub last_run_version: String,
     /// UI theme: dark, gray or light.
     pub theme: String,
+    pub tgws: TgwsConfig,
 }
 
 impl Default for AppConfig {
@@ -82,6 +137,7 @@ impl Default for AppConfig {
             runtime_path: String::new(),
             last_run_version: String::new(),
             theme: "dark".into(),
+            tgws: TgwsConfig::default(),
         }
     }
 }
@@ -97,6 +153,21 @@ pub fn config_path() -> PathBuf {
 
 pub fn runtime_dir() -> PathBuf {
     resolve_runtime_dir(&app_dir(), &load_config().runtime_path)
+}
+
+/// Folder that holds the headless Telegram proxy binary, its log and its
+/// update cache. Deliberately *outside* `runtime/`: updating the zapret bundle
+/// replaces that whole folder and would wipe the proxy.
+pub fn tgws_dir() -> PathBuf {
+    app_dir().join("tgws")
+}
+
+pub fn tgws_binary_path() -> PathBuf {
+    tgws_dir().join("tgws-cli.exe")
+}
+
+pub fn tgws_log_path() -> PathBuf {
+    tgws_dir().join("tgws.log")
 }
 
 /// Resolves the configured runtime folder. An empty value keeps the default

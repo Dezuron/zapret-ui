@@ -39,6 +39,13 @@ const configFixture: ConfigView = {
   theme: "dark",
   bench_budget: 100,
   bench_auto_apply: true,
+  tgws: {
+    autostart: true,
+    host: "127.0.0.1",
+    port: 1443,
+    secret: "00112233445566778899aabbccddeeff",
+    installed_version: "",
+  },
 };
 
 describe("folder selection", () => {

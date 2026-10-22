@@ -9,6 +9,7 @@ mod probe;
 mod runtime;
 mod strategy;
 mod sys;
+mod tgws;
 mod updater;
 mod whats_new;
 
@@ -47,6 +48,8 @@ pub struct AppState {
     pub bench_cancel: Arc<AtomicBool>,
     /// Last benchmark of this session (persisted to bench.json as well).
     pub last_bench: Mutex<Option<BenchSummary>>,
+    /// Supervisor for the bundled Telegram MTProto proxy.
+    pub tgws: crate::tgws::Tgws,
 }
 
 impl AppState {
@@ -57,6 +60,7 @@ impl AppState {
             update_running: Arc::new(AtomicBool::new(false)),
             bench_cancel: Arc::new(AtomicBool::new(false)),
             last_bench: Mutex::new(None),
+            tgws: crate::tgws::Tgws::new(),
         }
     }
 }
@@ -345,6 +349,23 @@ pub fn run() {
             commands::apply_candidate,
             commands::delete_generated,
             commands::get_last_bench,
+            commands::get_tgws_status,
+            commands::start_tgws,
+            commands::stop_tgws,
+            commands::restart_tgws,
+            commands::get_tgws_link,
+            commands::regenerate_tgws_secret,
+            commands::get_tgws_logs,
+            commands::check_tgws_update,
+            commands::install_tgws_update,
+            commands::dismiss_tgws_update,
+            commands::set_tgws_autostart,
+            commands::set_tgws_host,
+            commands::set_tgws_port,
+            commands::set_tgws_secret,
+            commands::open_tgws_log,
+            commands::open_telegram_link,
+            commands::copy_to_clipboard,
         ])
         .setup(move |app| {
             // Tray
@@ -408,6 +429,23 @@ pub fn run() {
             // bypass service is stopped; restore it before doing anything else.
             commands::recover_pending(&app.state::<AppState>());
 
+            // Telegram proxy: start it in the background when the user asked for
+            // it and the binary is already downloaded. A missing binary is not
+            // an error — the Telegram page offers to download it on demand.
+            {
+                let enabled = {
+                    let state = app.state::<AppState>();
+                    let cfg = lock_config(&state);
+                    cfg.tgws.autostart
+                };
+                if enabled && crate::config::tgws_binary_path().exists() {
+                    let handle = app.handle().clone();
+                    std::thread::spawn(move || {
+                        let _ = crate::tgws::start(&handle);
+                    });
+                }
+            }
+
             // On autostart, start hidden
             if is_autostart {
                 if let Some(w) = app.get_webview_window("main") {
@@ -447,8 +485,18 @@ pub fn run() {
 
             Ok(())
         })
-        .run(tauri::generate_context!())
-        .expect("error while running tauri application");
+        .build(tauri::generate_context!())
+        .expect("error while building tauri application")
+        .run(|app_handle, event| {
+            // The Telegram proxy is a child process: never leave it running
+            // after the window is gone, otherwise port 1443 stays occupied.
+            if matches!(
+                event,
+                tauri::RunEvent::ExitRequested { .. } | tauri::RunEvent::Exit
+            ) {
+                crate::tgws::stop_on_exit(app_handle);
+            }
+        });
 }
 
 #[cfg(test)]

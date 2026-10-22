@@ -18,6 +18,10 @@ src-tauri/target
 src-tauri/target-dist
 src-tauri/gen/schemas
 
+# Local PyInstaller build of the Telegram proxy (see scripts/tgws)
+tgws-artifacts
+build/tgws
+
 # Built portable exe copied to project root by scripts/build.ps1
 /zapret-ui.exe
 

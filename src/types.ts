@@ -34,6 +34,38 @@ export interface ConfigView {
   theme: string;
   bench_budget: number;
   bench_auto_apply: boolean;
+  tgws: TgwsConfigView;
+}
+
+export interface TgwsConfigView {
+  autostart: boolean;
+  host: string;
+  port: number;
+  secret: string;
+  installed_version: string;
+}
+
+export type TgwsState = "stopped" | "starting" | "running" | "stopping" | "error" | "not_installed";
+
+export interface TgwsStatus {
+  state: TgwsState;
+  pid: number | null;
+  last_error: string | null;
+  installed_version: string;
+  binary_present: boolean;
+}
+
+export interface TgwsUpdateInfo {
+  installed: string;
+  latest: string | null;
+  has_update: boolean;
+  asset_name: string | null;
+  asset_url: string | null;
+  asset_size: number;
+  digest: string | null;
+  release_url: string | null;
+  published_at: string | null;
+  dismissed: boolean;
 }
 
 export interface AppUpdateInfo {

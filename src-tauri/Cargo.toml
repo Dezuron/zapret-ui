@@ -1,6 +1,6 @@
 [package]
 name = "zapret-ui"
-version = "1.1.0"
+version = "1.2.0"
 description = "Windows 11 GUI manager for flowseal-zapret (zapret-discord-youtube by Flowseal)"
 authors = ["Dezuron"]
 license = "MIT"
@@ -25,8 +25,9 @@ thiserror = "2"
 reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "json", "blocking"] }
 zip = { version = "2", default-features = false, features = ["deflate"] }
 sha2 = "0.10"
+getrandom = "0.2"
 dirs = "5"
-windows-sys = { version = "0.59", features = ["Win32_UI_Shell", "Win32_UI_WindowsAndMessaging", "Win32_System_Registry", "Win32_Foundation", "Win32_Graphics_Dwm", "Win32_System_SystemInformation", "Win32_System_Threading"] }
+windows-sys = { version = "0.59", features = ["Win32_UI_Shell", "Win32_UI_WindowsAndMessaging", "Win32_System_Registry", "Win32_Foundation", "Win32_Graphics_Dwm", "Win32_System_SystemInformation", "Win32_System_Threading", "Win32_System_DataExchange", "Win32_System_Memory", "Win32_System_Ole"] }
 
 [profile.release]
 lto = true
