@@ -77,6 +77,15 @@ pub async fn install_tgws_update(app: tauri::AppHandle) -> AppResult<u64> {
 }
 
 #[tauri::command]
+pub async fn use_tgws_fallback_port(app: tauri::AppHandle) -> AppResult<u16> {
+    Ok(
+        tauri::async_runtime::spawn_blocking(move || tgws::switch_to_free_port(&app))
+            .await
+            .map_err(|e| e.to_string())??,
+    )
+}
+
+#[tauri::command]
 pub fn dismiss_tgws_update(app: tauri::AppHandle, tag: String) -> AppResult<()> {
     Ok(tgws::dismiss_update(&app, &tag)?)
 }

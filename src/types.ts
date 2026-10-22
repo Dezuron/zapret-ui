@@ -53,6 +53,12 @@ export interface TgwsStatus {
   last_error: string | null;
   installed_version: string;
   binary_present: boolean;
+  port_conflict: boolean;
+}
+
+export interface TgwsNotice {
+  ok: boolean;
+  message: string;
 }
 
 export interface TgwsUpdateInfo {

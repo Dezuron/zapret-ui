@@ -8,6 +8,7 @@ import type {
   BenchSummary,
   ConfigView,
   QuickCheck,
+  TgwsNotice,
   TgwsStatus,
   TgwsUpdateInfo,
   UpdateInfo,
@@ -151,10 +152,20 @@ export async function initStore() {
     await listen<string>("tgws-log", (event) => {
       tgwsLogs.value = tgwsLogTail([...tgwsLogs.value, event.payload]);
     }),
+    await listen<string>("tgws-progress", (event) => {
+      tgwsProgress.value = event.payload || null;
+    }),
+    await listen<TgwsNotice>("tgws-notice", async (event) => {
+      toast(event.payload.ok ? "success" : "warning", event.payload.message);
+      await refreshTgws();
+    }),
   ];
 
   await refreshInternal(false);
   void refreshTgws();
+  // Silent proxy update check on startup, like the app and zapret checks.
+  // The backend cache keeps this to one GitHub request per 12 hours.
+  void checkTgwsUpdate(true);
   await loadWhatsNew();
   if (config.value?.theme) {
     void invoke("set_theme", { theme: config.value.theme }).catch(() => undefined);
@@ -791,6 +802,21 @@ export function setTgwsPort(port: number) {
 
 export function setTgwsSecret(secret: string) {
   return setTgwsSetting<string>("set_tgws_secret", { secret });
+}
+
+/** Moves the proxy to the next free port and restarts it (port busy error). */
+export async function switchTgwsPort() {
+  if (tgwsBusy.value) return;
+  tgwsBusy.value = true;
+  try {
+    const port = await invoke<number>("use_tgws_fallback_port");
+    await refreshTgws();
+    toast("success", `Прокси занял порт ${port}. Ссылка в Telegram обновлена.`);
+  } catch (error) {
+    toast("error", String(error));
+  } finally {
+    tgwsBusy.value = false;
+  }
 }
 
 export async function toggleTgwsAutostart(enabled: boolean) {

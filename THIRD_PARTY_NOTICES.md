@@ -64,16 +64,17 @@ Their copyright notice is retained above.
 - License: MIT
 
 The Telegram proxy binary (`tgws-cli-windows-x64.exe`) is **not** bundled in the
-`zapret-ui` release archives: the app downloads it on demand from this
-repository's `tgws-v*` releases into `%LOCALAPPDATA%\zapret-ui\tgws\`.
+`zapret-ui` release archives: the app downloads it on demand from
+[Dezuron/tgws-cli](https://github.com/Dezuron/tgws-cli) releases into
+`%LOCALAPPDATA%\zapret-ui\tgws\`.
 
-The binary is built in GitHub Actions from the **unmodified** upstream sources at
-the tag named in the release (`tgws-v1.11.2-1` → upstream `v1.11.2`). The only
-addition is a small launcher (`scripts/tgws/entry.py`) that calls the upstream
-console entry point `proxy.tg_ws_proxy:main`, so the frozen executable starts
-headless instead of creating a tray icon and GUI dialogs
-(`scripts/tgws/tgws-cli.spec`). Upstream's own Windows release remains the
-tray application and is not redistributed here.
+The binary is built in that repository's GitHub Actions from the **unmodified**
+upstream sources at the tag named in the release (`v1.11.2-1` → upstream
+`v1.11.2`). The only addition is a small launcher (`entry.py`) that calls the
+upstream console entry point `proxy.tg_ws_proxy:main`, so the frozen executable
+starts headless instead of creating a tray icon and GUI dialogs
+(`tgws-cli.spec`). Upstream's own Windows release remains the tray application
+and is not redistributed here.
 
 The upstream MIT license text:
 

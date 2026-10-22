@@ -40,6 +40,7 @@ import {
   setTgwsHost,
   setTgwsPort,
   setTgwsSecret,
+  switchTgwsPort,
   tgwsBusy,
   tgwsChecking,
   tgwsHasUpdate,
@@ -191,10 +192,21 @@ async function commitSecret() {
         </div>
 
         <p v-if="tgwsProgress" class="tgws-progress">{{ tgwsProgress }}</p>
-        <p v-if="tgwsStatus?.last_error" class="tgws-error">
+        <div v-if="tgwsStatus?.last_error" class="tgws-error">
           <AlertTriangle :size="14" />
-          <span>{{ tgwsStatus.last_error }}</span>
-        </p>
+          <div class="tgws-error-body">
+            <span>{{ tgwsStatus.last_error }}</span>
+            <Button
+              v-if="tgwsStatus?.port_conflict"
+              variant="outline"
+              size="sm"
+              :disabled="tgwsBusy"
+              @click="switchTgwsPort"
+            >
+              Занять свободный порт
+            </Button>
+          </div>
+        </div>
       </CardContent>
     </Card>
 
@@ -489,6 +501,14 @@ async function commitSecret() {
   border: 1px solid color-mix(in oklab, var(--danger) 40%, transparent);
   background: var(--danger-soft);
   color: var(--danger);
+}
+
+.tgws-error-body {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 8px;
+  min-width: 0;
 }
 
 .tgws-warning {
