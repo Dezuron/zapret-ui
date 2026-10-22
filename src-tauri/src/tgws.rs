@@ -24,9 +24,10 @@ use std::sync::{Mutex, MutexGuard};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 use tauri::{AppHandle, Emitter, Manager};
 
-/// Repository that publishes `tgws-v*` releases with the headless binary.
-const REPO: &str = "Dezuron/zapret-ui";
-const TAG_PREFIX: &str = "tgws-v";
+/// Repository that publishes the headless proxy binary. It lives outside this
+/// project so the application's release list stays clean (and `/releases/latest`
+/// keeps pointing at an app release, which the self-updater depends on).
+const REPO: &str = "Dezuron/tgws-cli";
 const ASSET_NAME: &str = "tgws-cli-windows-x64.exe";
 /// Image name of our own binary; only this image is ever killed by name.
 const BINARY_IMAGE: &str = "tgws-cli.exe";
@@ -57,6 +58,9 @@ pub struct TgwsStatus {
     pub last_error: Option<String>,
     pub installed_version: String,
     pub binary_present: bool,
+    /// True when the last start failed because the configured port is taken by
+    /// a foreign process; the UI then offers a one-click fallback port.
+    pub port_conflict: bool,
 }
 
 /// Runtime state of the supervisor, stored in [`AppState`].
@@ -86,6 +90,7 @@ impl Tgws {
                 last_error: None,
                 installed_version: String::new(),
                 binary_present: false,
+                port_conflict: false,
             }),
             logs: Mutex::new(VecDeque::new()),
             op: Mutex::new(()),
@@ -429,6 +434,22 @@ fn port_available(host: &str, port: u16) -> bool {
     TcpListener::bind((host, port)).is_ok()
 }
 
+/// First free port after `current`, looking at most `attempts` candidates ahead.
+fn next_free_port(host: &str, current: u16, attempts: u16) -> Option<u16> {
+    for offset in 1..=attempts {
+        let Some(candidate) = current.checked_add(offset) else {
+            break;
+        };
+        if !(1024..=65535).contains(&candidate) {
+            continue;
+        }
+        if port_available(host, candidate) {
+            return Some(candidate);
+        }
+    }
+    None
+}
+
 fn ensure_port_free(app: &AppHandle, cfg: &config::TgwsConfig) -> Result<(), String> {
     if port_available(&cfg.host, cfg.port) {
         return Ok(());
@@ -440,13 +461,32 @@ fn ensure_port_free(app: &AppHandle, cfg: &config::TgwsConfig) -> Result<(), Str
     if port_available(&cfg.host, cfg.port) {
         return Ok(());
     }
+    set_status(app, |s| s.port_conflict = true);
     Err(mark_failed(
         app,
         format!(
-            "Порт {} занят другим приложением. Укажите другой порт в параметрах.",
+            "Порт {} занят другим приложением. Укажите другой порт в параметрах или займите соседний.",
             cfg.port
         ),
     ))
+}
+
+/// Moves the proxy to the first free port after the current one and starts it.
+/// Used by the one-click action next to the "port is busy" error.
+pub fn switch_to_free_port(app: &AppHandle) -> Result<u16, String> {
+    let state = app.state::<AppState>();
+    let _guard = lock(&state.tgws.op);
+
+    let cfg = load_cfg(app);
+    let port = next_free_port(&cfg.host, cfg.port, 20)
+        .ok_or("Рядом нет свободного порта — укажите его в параметрах.")?;
+
+    save_cfg(app, |c| {
+        c.port = port;
+    })?;
+    set_status(app, |s| s.port_conflict = false);
+    start_locked(app)?;
+    Ok(port)
 }
 
 pub fn start(app: &AppHandle) -> Result<(), String> {
@@ -564,6 +604,7 @@ fn start_locked(app: &AppHandle) -> Result<(), String> {
         s.state = TgwsState::Running;
         s.pid = Some(pid);
         s.last_error = None;
+        s.port_conflict = false;
     });
     spawn_watcher(app.clone(), pid);
     Ok(())
@@ -643,6 +684,7 @@ fn stop_locked(app: &AppHandle) -> Result<(), String> {
     set_status(app, |s| {
         s.state = TgwsState::Stopped;
         s.pid = None;
+        s.port_conflict = false;
     });
     Ok(())
 }
@@ -686,6 +728,10 @@ pub struct TgwsUpdateInfo {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 struct CachedRelease {
+    /// Repository the entry was resolved from; a cache written before the
+    /// binary moved to its own repository must not be reused.
+    #[serde(default)]
+    repo: String,
     at: u64,
     latest: String,
     asset_name: Option<String>,
@@ -746,34 +792,23 @@ pub fn compare_versions(a: &str, b: &str) -> Ordering {
     Ordering::Equal
 }
 
-fn pick_release(releases: Vec<GhRelease>) -> Option<CachedRelease> {
-    let mut best: Option<(String, GhRelease)> = None;
-    for release in releases {
-        let Some(version) = release.tag_name.strip_prefix(TAG_PREFIX) else {
-            continue;
-        };
-        let version = version.trim().to_string();
-        if version.is_empty() {
-            continue;
-        }
-        let newer = best
-            .as_ref()
-            .map(|(current, _)| compare_versions(&version, current) == Ordering::Greater)
-            .unwrap_or(true);
-        if newer {
-            best = Some((version, release));
-        }
+/// Turns the latest release of the proxy repository into a cache entry. Returns
+/// `None` when the release does not carry our asset (a hand-made or draft
+/// release), so the UI simply reports "no update".
+fn release_from(release: GhRelease) -> Option<CachedRelease> {
+    let version = release.tag_name.trim().trim_start_matches('v').to_string();
+    if version.is_empty() {
+        return None;
     }
-
-    let (latest, release) = best?;
-    let asset = release.assets.iter().find(|a| a.name == ASSET_NAME);
+    let asset = release.assets.iter().find(|a| a.name == ASSET_NAME)?;
     Some(CachedRelease {
+        repo: REPO.to_string(),
         at: now_secs(),
-        latest,
-        asset_name: asset.map(|a| a.name.clone()),
-        asset_url: asset.map(|a| a.browser_download_url.clone()),
-        asset_size: asset.map(|a| a.size).unwrap_or(0),
-        digest: asset.and_then(|a| a.digest.clone()),
+        latest: version,
+        asset_name: Some(asset.name.clone()),
+        asset_url: Some(asset.browser_download_url.clone()),
+        asset_size: asset.size,
+        digest: asset.digest.clone(),
         release_url: if release.html_url.is_empty() {
             None
         } else {
@@ -800,7 +835,11 @@ fn hydrate_cache(app: &AppHandle) {
         return;
     };
     if let Ok(cached) = serde_json::from_str::<CachedRelease>(&text) {
-        *lock(&state.tgws.cache) = Some(cached);
+        // A cache written when the binary lived in another repository (or an
+        // older format) must not be trusted.
+        if cached.repo == REPO {
+            *lock(&state.tgws.cache) = Some(cached);
+        }
     }
 }
 
@@ -816,8 +855,8 @@ fn store_cache(app: &AppHandle, cached: &CachedRelease) {
     }
 }
 
-fn fetch_releases() -> Result<Vec<GhRelease>, String> {
-    let url = format!("https://api.github.com/repos/{REPO}/releases?per_page=30");
+fn fetch_latest_release() -> Result<Option<GhRelease>, String> {
+    let url = format!("https://api.github.com/repos/{REPO}/releases/latest");
     let client = reqwest::blocking::Client::builder()
         .user_agent(format!("zapret-ui/{}", env!("CARGO_PKG_VERSION")))
         .connect_timeout(Duration::from_secs(15))
@@ -833,13 +872,14 @@ fn fetch_releases() -> Result<Vec<GhRelease>, String> {
 
     // No releases at all (fresh repository) is not an error for the user.
     if response.status() == reqwest::StatusCode::NOT_FOUND {
-        return Ok(Vec::new());
+        return Ok(None);
     }
     if !response.status().is_success() {
         return Err(format!("GitHub ответил кодом {}", response.status()));
     }
     response
-        .json::<Vec<GhRelease>>()
+        .json::<GhRelease>()
+        .map(Some)
         .map_err(|e| format!("Некорректный ответ GitHub: {e}"))
 }
 
@@ -885,8 +925,8 @@ pub fn check_update(app: &AppHandle, force: bool) -> Result<TgwsUpdateInfo, Stri
         }
     }
 
-    let releases = fetch_releases()?;
-    let Some(fetched) = pick_release(releases) else {
+    let fetched = fetch_latest_release()?.and_then(release_from);
+    let Some(fetched) = fetched else {
         return Ok(TgwsUpdateInfo {
             installed: cfg.installed_version.clone(),
             latest: None,
@@ -1005,6 +1045,49 @@ fn recover_binary(dir: &Path) {
     let _ = fs::remove_file(dir.join(format!("{BINARY_IMAGE}.new")));
 }
 
+/// Event payload for the background auto-install of the proxy.
+#[derive(Debug, Clone, Serialize)]
+pub struct TgwsNotice {
+    pub ok: bool,
+    pub message: String,
+}
+
+fn emit_progress(app: &AppHandle, message: &str) {
+    let _ = app.emit("tgws-progress", message);
+}
+
+fn emit_notice(app: &AppHandle, ok: bool, message: impl Into<String>) {
+    let _ = app.emit(
+        "tgws-notice",
+        TgwsNotice {
+            ok,
+            message: message.into(),
+        },
+    );
+}
+
+/// Downloads the proxy when it is missing. Used by the autostart path so a
+/// fresh install becomes usable without visiting the Telegram page first.
+pub fn ensure_installed(app: &AppHandle) -> Result<(), String> {
+    if config::tgws_binary_path().exists() {
+        return Ok(());
+    }
+    match install_latest(app) {
+        Ok(_) => {
+            emit_notice(app, true, "Telegram-прокси скачан и готов к работе.");
+            Ok(())
+        }
+        Err(error) => {
+            emit_notice(
+                app,
+                false,
+                format!("Не удалось скачать Telegram-прокси: {error}"),
+            );
+            Err(error)
+        }
+    }
+}
+
 /// Everything needed to install a release, resolved on the backend so the
 /// renderer cannot point the updater at an arbitrary executable.
 struct TgwsAsset {
@@ -1032,7 +1115,14 @@ fn resolve_asset(app: &AppHandle) -> Result<TgwsAsset, String> {
 }
 
 /// Downloads and installs the newest published proxy release. Returns its size.
+/// Emits `tgws-progress` for the UI and always clears it afterwards.
 pub fn install_latest(app: &AppHandle) -> Result<u64, String> {
+    let result = install_latest_inner(app);
+    emit_progress(app, "");
+    result
+}
+
+fn install_latest_inner(app: &AppHandle) -> Result<u64, String> {
     let asset = resolve_asset(app)?;
     let expected = asset
         .digest
@@ -1043,6 +1133,14 @@ pub fn install_latest(app: &AppHandle) -> Result<u64, String> {
 
     let state = app.state::<AppState>();
     let _guard = lock(&state.tgws.op);
+
+    // A concurrent auto-install may have completed while we waited for the lock.
+    if config::tgws_binary_path().exists()
+        && load_cfg(app).installed_version.trim() == asset.version.trim()
+    {
+        return Ok(0);
+    }
+
     let was_running = status(app).state == TgwsState::Running;
 
     stop_locked(app)?;
@@ -1052,12 +1150,14 @@ pub fn install_latest(app: &AppHandle) -> Result<u64, String> {
     std::thread::sleep(Duration::from_millis(300));
 
     recover_binary(&config::tgws_dir());
+    emit_progress(app, "Скачивание Telegram-прокси…");
     let bytes = download(&asset.url)?;
     let actual = format!("{:x}", Sha256::digest(&bytes));
     if !actual.eq_ignore_ascii_case(expected.trim()) {
         return Err("Контрольная сумма бинарника не совпала — обновление отменено.".into());
     }
 
+    emit_progress(app, "Установка…");
     write_binary(&config::tgws_dir(), &bytes)?;
 
     save_cfg(app, |cfg| {
@@ -1073,6 +1173,7 @@ pub fn install_latest(app: &AppHandle) -> Result<u64, String> {
         s.pid = None;
         s.last_error = None;
         s.binary_present = true;
+        s.port_conflict = false;
     });
 
     if was_running {
@@ -1218,7 +1319,7 @@ mod tests {
     }
 
     #[test]
-    fn picks_the_newest_tgws_release_with_our_asset() {
+    fn release_is_parsed_only_with_our_asset() {
         let release = |tag: &str, asset: &str, url: &str| GhRelease {
             tag_name: tag.into(),
             html_url: format!("https://github.com/x/y/releases/tag/{tag}"),
@@ -1231,44 +1332,30 @@ mod tests {
             }],
         };
 
-        let releases = vec![
-            release("v1.2.0", ASSET_NAME, "https://github.com/app.exe"),
-            release(
-                "tgws-v1.11.2",
-                ASSET_NAME,
-                "https://github.com/tgws-old.exe",
-            ),
-            release(
-                "tgws-v1.11.2-1",
-                ASSET_NAME,
-                "https://github.com/tgws-new.exe",
-            ),
-        ];
-        let picked = pick_release(releases).expect("release");
+        let picked = release_from(release(
+            "v1.11.2-1",
+            ASSET_NAME,
+            "https://github.com/tgws-cli.exe",
+        ))
+        .expect("release");
         assert_eq!(picked.latest, "1.11.2-1");
+        assert_eq!(picked.repo, REPO);
         assert_eq!(
             picked.asset_url.as_deref(),
-            Some("https://github.com/tgws-new.exe")
+            Some("https://github.com/tgws-cli.exe")
         );
         assert_eq!(picked.digest.as_deref(), Some("sha256:abc"));
-    }
 
-    #[test]
-    fn ignores_releases_without_our_asset() {
-        let releases = vec![GhRelease {
-            tag_name: "tgws-v1.11.2".into(),
-            html_url: String::new(),
-            published_at: None,
-            assets: vec![],
-        }];
-        let picked = pick_release(releases).expect("release");
-        assert!(picked.asset_url.is_none());
-        assert!(picked.release_url.is_none());
+        // A release without our asset is not an update we can install.
+        assert!(release_from(release("v1.11.2-1", "readme.txt", "https://x")).is_none());
+        // An empty tag is never trusted.
+        assert!(release_from(release("", ASSET_NAME, "https://x")).is_none());
     }
 
     #[test]
     fn update_is_offered_when_installed_version_is_unknown() {
         let cached = CachedRelease {
+            repo: REPO.to_string(),
             at: now_secs(),
             latest: "1.11.2-1".into(),
             asset_name: Some(ASSET_NAME.into()),
@@ -1294,6 +1381,17 @@ mod tests {
         let _ = fs::remove_dir_all(&dir);
         fs::create_dir_all(&dir).unwrap();
         dir
+    }
+
+    #[test]
+    fn next_free_port_skips_a_busy_candidate() {
+        let busy = TcpListener::bind(("127.0.0.1", 0)).expect("listener");
+        let port = busy.local_addr().expect("addr").port();
+        // Pretend the busy port is the current one, so the first candidate is
+        // exactly that occupied port.
+        let chosen = next_free_port("127.0.0.1", port.saturating_sub(1), 20).expect("free port");
+        assert!(chosen > port, "chosen {chosen} must be after busy {port}");
+        assert!(port_available("127.0.0.1", chosen));
     }
 
     #[test]

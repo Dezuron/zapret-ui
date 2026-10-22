@@ -363,6 +363,7 @@ pub fn run() {
             commands::set_tgws_host,
             commands::set_tgws_port,
             commands::set_tgws_secret,
+            commands::use_tgws_fallback_port,
             commands::open_tgws_log,
             commands::open_telegram_link,
             commands::copy_to_clipboard,
@@ -438,12 +439,22 @@ pub fn run() {
                     let cfg = lock_config(&state);
                     cfg.tgws.autostart
                 };
-                if enabled && crate::config::tgws_binary_path().exists() {
+                if enabled {
                     let handle = app.handle().clone();
                     std::thread::spawn(move || {
-                        // A failure is published through `tgws-status` and shown
-                        // on the Telegram page, so nothing is silently lost.
-                        let _ = crate::tgws::start(&handle);
+                        // A fresh install has no binary yet: fetch it first, then
+                        // start. Progress and failures are published as
+                        // `tgws-progress` / `tgws-notice`, the rest via status.
+                        if crate::tgws::ensure_installed(&handle).is_ok() {
+                            let still_enabled = {
+                                let state = handle.state::<AppState>();
+                                let cfg = lock_config(&state);
+                                cfg.tgws.autostart
+                            };
+                            if still_enabled {
+                                let _ = crate::tgws::start(&handle);
+                            }
+                        }
                     });
                 }
             }

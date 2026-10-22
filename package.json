@@ -1,7 +1,7 @@
 {
   "name": "zapret-ui",
   "private": true,
-  "version": "1.2.0",
+  "version": "1.2.1",
   "description": "Windows 11 GUI manager for flowseal-zapret (zapret-discord-youtube by Flowseal)",
   "author": "Dezuron",
   "license": "MIT",

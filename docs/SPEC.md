@@ -218,8 +218,9 @@
 | `get_tgws_status` / `start_tgws` / `stop_tgws` / `restart_tgws` | состояние и управление Telegram-прокси (см. 6.11) |
 | `get_tgws_link` / `regenerate_tgws_secret` | `tg://proxy`-ссылка и смена ключа (с перезапуском) |
 | `get_tgws_logs` / `open_tgws_log` | кольцевой буфер логов (300 строк) и файл лога |
-| `check_tgws_update` / `install_tgws_update` / `dismiss_tgws_update` | обновление бинарника прокси из `tgws-v*` релизов |
+| `check_tgws_update` / `install_tgws_update` / `dismiss_tgws_update` | обновление бинарника прокси из `Dezuron/tgws-cli` |
 | `set_tgws_autostart` / `set_tgws_host` / `set_tgws_port` / `set_tgws_secret` | настройки прокси с валидацией и перезапуском |
+| `use_tgws_fallback_port` | занять первый свободный порт после текущего и запустить прокси |
 | `copy_to_clipboard` / `open_telegram_link` | буфер обмена (Win32) и открытие `tg://proxy`-ссылки |
 
 ### 6.7 `lib.rs` — трей, single-instance, autostart-флаг
@@ -321,15 +322,16 @@
 
 - **Источник:** [Flowseal/tg-ws-proxy](https://github.com/Flowseal/tg-ws-proxy) (MIT). Upstream
   для Windows — трей-GUI; у него **нет** `--host/--port/--secret`, параметры берутся из
-  `%APPDATA%\TgWsProxy\config.json`. Поэтому в нашем репозитории собирается headless-бинарник
-  из **штатного консольного входа** upstream (`proxy.tg_ws_proxy:main`): `scripts/tgws/entry.py`
-  (12 строк) + `scripts/tgws/tgws-cli.spec`. GUI-зависимости (`pystray`, `customtkinter`,
-  `Pillow`, `pyperclip`, `psutil`) исключены из бандла.
-- **Сборка:** `.github/workflows/tgws-build.yml` по тегу `tgws-v<upstream>-<revision>`
-  (например `tgws-v1.11.2-1`): клонирует upstream на тег `v1.11.2`, ставит его и PyInstaller,
+  `%APPDATA%\TgWsProxy\config.json`. Поэтому headless-бинарник собирается из **штатного
+  консольного входа** upstream (`proxy.tg_ws_proxy:main`) в отдельном репозитории
+  [Dezuron/tgws-cli](https://github.com/Dezuron/tgws-cli): `entry.py` (12 строк) + `tgws-cli.spec`.
+  GUI-зависимости (`pystray`, `customtkinter`, `Pillow`, `pyperclip`, `psutil`) исключены.
+- **Сборка:** `.github/workflows/build.yml` в `Dezuron/tgws-cli` по тегу `v<upstream>-<revision>`
+  (например `v1.11.2-1`): клонирует upstream на тег `v1.11.2`, ставит его и PyInstaller,
   собирает `tgws-cli-windows-x64.exe` (~14 МБ), проверяет `--help` **и реальный bind порта**,
-  публикует Release с этим ассетом и `SHA256SUMS.txt`. Тег-неймспейс отдельный, чтобы не
-  смешиваться с релизами приложения.
+  публикует Release с этим ассетом и `SHA256SUMS.txt`. Библиотека живёт отдельно от приложения,
+  чтобы список релизов zapret-ui оставался чистым: `releases/latest` этого репозитория —
+  только версии приложения, на нём держится самообновление.
 - **Хранение:** `%LOCALAPPDATA%\zapret-ui\tgws\tgws-cli.exe` — вне `runtime\`, иначе
   обновление zapret снесло бы прокси. Лог `tgws.log` с ротацией 5 МБ × 1.
 - **Конфиг** (`config.json`, секция `tgws`, все поля `#[serde(default)]`):
@@ -342,7 +344,8 @@
   процессов (как и у upstream) — принимаем: тот же пользователь, локальный процесс.
 - **Супервизор** (`src-tauri/src/tgws.rs`): мьютекс на start/stop/restart; пред-проверка
   порта (`TcpListener::bind`), при занятости — `taskkill /F /T /IM tgws-cli.exe` (только
-  свой образ) и повторная проверка, иначе понятная ошибка; spawn с `CREATE_NO_WINDOW`;
+  свой образ), повторная проверка и `port_conflict = true` в статусе (UI предлагает
+  «Занять свободный порт» → `switch_to_free_port`); spawn с `CREATE_NO_WINDOW`;
   stdout+stderr читаются в кольцевой буфер (300 строк) и файл, строки с секретом маскируются;
   через 700 мс проверяется, что процесс жив → `running`; стоп — `taskkill /F /T /PID` и
   ожидание exit до 3 с.
@@ -352,17 +355,21 @@
   `fake_tls_domain`, upstream ждёт `ee<secret><hex(домена)>`, и приложение строит именно такую
   ссылку (`link_for`). Для `0.0.0.0`/`::` в ссылке подставляется `127.0.0.1`; IPv6 берётся
   в скобки.
-- **Обновления:** `GET /repos/Dezuron/zapret-ui/releases?per_page=30`, фильтр тегов
-  `tgws-v*`, максимальная версия, ассет `tgws-cli-windows-x64.exe`, `digest` обязателен.
-  Кэш 12 ч (память + `tgws_update_cache.json` в корне данных приложения), «Позже» пишет
-  `dismissed_update_tag` (скрывает только пассивный баннер; в «Настройках» обновление остаётся
-  доступным). Ссылку, версию и digest для установки backend берёт из своего кэша релиза, а не
-  из webview. Установка: стоп → скачать → SHA-256 → `taskkill` образа (снять write-lock) →
-  запись `tgws-cli.exe.new` → замена с бэкапом `.old` и восстановлением при следующем старте →
-  сохранить версию → перезапуск, если работал.
-- **Жизненный цикл:** автостарт в `setup`, если `autostart` и бинарник есть; закрытие окна
+- **Обновления:** `GET /repos/Dezuron/tgws-cli/releases/latest`; ассет
+  `tgws-cli-windows-x64.exe`, `digest` обязателен. Кэш 12 ч (память +
+  `tgws_update_cache.json` в корне данных приложения; записи из другого репозитория
+  игнорируются), «Позже» пишет `dismissed_update_tag` (скрывает только пассивный баннер;
+  в «Настройках» обновление остаётся доступным). Ссылку, версию и digest для установки
+  backend берёт из своего кэша релиза, а не из webview. Установка: стоп → скачать →
+  SHA-256 → `taskkill` образа (снять write-lock) → запись `tgws-cli.exe.new` → замена
+  с бэкапом `.old` и восстановлением при следующем старте → сохранить версию →
+  перезапуск, если работал.
+- **Жизненный цикл:** в `setup` при `autostart` приложение сначала вызывает
+  `ensure_installed` (если бинарника нет — скачивает последний релиз, прогресс и результат
+  идут событиями `tgws-progress` / `tgws-notice`), затем стартует прокси; закрытие окна
   (`X`) прячет в трей и прокси продолжает работать; выход из приложения
   (`RunEvent::ExitRequested`/`Exit`) останавливает прокси и убивает возможного сироту.
+  Проверка обновлений прокси идёт при старте приложения (кэш 12 ч) и вручную.
 - **UI:** страница «Telegram» (`src/pages/TelegramPage.vue`) — статус и тумблер, баннер
   обновления, ссылка с копированием/открытием/сменой ключа, host/port/secret, тумблер
   автозапуска, предупреждение при не-loopback хосте, сворачиваемые логи. Карточка Telegram
