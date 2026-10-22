@@ -8,11 +8,14 @@ import type {
   BenchSummary,
   ConfigView,
   QuickCheck,
+  TgwsStatus,
+  TgwsUpdateInfo,
   UpdateInfo,
   WhatsNew,
 } from "../types";
 import { confirmAction } from "../lib/confirm";
 import { toast } from "../lib/toast";
+import { tgwsLogTail } from "../lib/tgws";
 import {
   status,
   config,
@@ -35,6 +38,13 @@ import {
   budget,
   running,
   currentName,
+  tgwsStatus,
+  tgwsUpdate,
+  tgwsLogs,
+  tgwsLink,
+  tgwsBusy,
+  tgwsChecking,
+  tgwsProgress,
 } from "./state";
 
 // ---------- polling ----------
@@ -135,9 +145,16 @@ export async function initStore() {
     await listen<string>("app-update-progress", (event) => {
       appUpdateProgress.value = event.payload;
     }),
+    await listen<TgwsStatus>("tgws-status", (event) => {
+      tgwsStatus.value = event.payload;
+    }),
+    await listen<string>("tgws-log", (event) => {
+      tgwsLogs.value = tgwsLogTail([...tgwsLogs.value, event.payload]);
+    }),
   ];
 
   await refreshInternal(false);
+  void refreshTgws();
   await loadWhatsNew();
   if (config.value?.theme) {
     void invoke("set_theme", { theme: config.value.theme }).catch(() => undefined);
@@ -612,6 +629,201 @@ export async function setGameFilter(mode: string) {
 export async function openFolder() {
   try {
     await invoke("open_runtime_folder");
+  } catch (error) {
+    toast("error", String(error));
+  }
+}
+
+// ---------- Telegram proxy ----------
+
+/** Loads everything the Telegram page renders: state, link and log tail. */
+export async function refreshTgws() {
+  try {
+    const [nextStatus, logs] = await Promise.all([
+      invoke<TgwsStatus>("get_tgws_status"),
+      invoke<string[]>("get_tgws_logs"),
+    ]);
+    tgwsStatus.value = nextStatus;
+    tgwsLogs.value = tgwsLogTail(logs);
+    await refreshTgwsLink();
+  } catch (error) {
+    console.warn("Не удалось обновить состояние Telegram-прокси", error);
+  }
+}
+
+async function refreshTgwsLink() {
+  try {
+    tgwsLink.value = await invoke<string>("get_tgws_link");
+  } catch (error) {
+    console.warn("Не удалось получить ссылку Telegram-прокси", error);
+    tgwsLink.value = "";
+  }
+}
+
+export async function checkTgwsUpdate(silent = true, force = false) {
+  if (tgwsChecking.value) return;
+  tgwsChecking.value = true;
+  try {
+    const info = await invoke<TgwsUpdateInfo>("check_tgws_update", { force });
+    // An explicit check is a request to see updates, so a previously dismissed
+    // banner is allowed to come back for this session.
+    tgwsUpdate.value = force && info.has_update ? { ...info, dismissed: false } : info;
+    if (!silent) {
+      toast(
+        "info",
+        info.has_update && info.latest
+          ? `Доступно обновление прокси ${info.latest}.`
+          : "Обновлений Telegram-прокси нет.",
+      );
+    }
+  } catch (error) {
+    if (!silent) toast("error", String(error));
+  } finally {
+    tgwsChecking.value = false;
+  }
+}
+
+/** Downloads and installs the newest proxy release (resolved by the backend). */
+async function installTgwsBinary(): Promise<void> {
+  tgwsProgress.value = "Скачивание прокси…";
+  await invoke("install_tgws_update");
+  tgwsProgress.value = "Готово";
+}
+
+export async function toggleTgws() {
+  if (tgwsBusy.value) return;
+  const runningNow = tgwsStatus.value?.state === "running";
+  tgwsBusy.value = true;
+  try {
+    if (runningNow) {
+      await invoke("stop_tgws");
+      toast("info", "Telegram-прокси остановлен.");
+    } else {
+      if (!tgwsStatus.value?.binary_present) {
+        await installTgwsBinary();
+      }
+      await invoke("start_tgws");
+      toast("success", "Telegram-прокси включён.");
+    }
+  } catch (error) {
+    toast("error", String(error));
+  } finally {
+    await refreshTgws();
+    tgwsBusy.value = false;
+    tgwsProgress.value = null;
+  }
+}
+
+export async function restartTgws() {
+  if (tgwsBusy.value) return;
+  tgwsBusy.value = true;
+  try {
+    await invoke("restart_tgws");
+    toast("success", "Telegram-прокси перезапущен.");
+  } catch (error) {
+    toast("error", String(error));
+  } finally {
+    await refreshTgws();
+    tgwsBusy.value = false;
+  }
+}
+
+export async function applyTgwsUpdate() {
+  if (tgwsBusy.value) return;
+  tgwsBusy.value = true;
+  try {
+    await installTgwsBinary();
+    await refreshTgws();
+    await checkTgwsUpdate(true, true);
+    toast("success", "Telegram-прокси обновлён.");
+  } catch (error) {
+    toast("error", String(error));
+  } finally {
+    tgwsBusy.value = false;
+    tgwsProgress.value = null;
+  }
+}
+
+export async function dismissTgwsUpdate() {
+  const tag = tgwsUpdate.value?.latest;
+  if (!tag) return;
+  try {
+    await invoke("dismiss_tgws_update", { tag });
+    if (tgwsUpdate.value) tgwsUpdate.value = { ...tgwsUpdate.value, dismissed: true };
+  } catch (error) {
+    toast("error", String(error));
+  }
+}
+
+export async function regenerateTgwsSecret() {
+  if (tgwsBusy.value) return;
+  tgwsBusy.value = true;
+  try {
+    await invoke<string>("regenerate_tgws_secret");
+    await refreshTgws();
+    toast("success", "Ключ и ссылка изменены.");
+  } catch (error) {
+    toast("error", String(error));
+  } finally {
+    tgwsBusy.value = false;
+  }
+}
+
+async function setTgwsSetting<T>(command: string, args: Record<string, unknown>): Promise<T> {
+  try {
+    const saved = await invoke<T>(command, args);
+    await refreshInternal(true);
+    await refreshTgws();
+    return saved;
+  } catch (error) {
+    toast("error", String(error));
+    throw error;
+  }
+}
+
+export function setTgwsHost(host: string) {
+  return setTgwsSetting<string>("set_tgws_host", { host });
+}
+
+export function setTgwsPort(port: number) {
+  return setTgwsSetting<number>("set_tgws_port", { port });
+}
+
+export function setTgwsSecret(secret: string) {
+  return setTgwsSetting<string>("set_tgws_secret", { secret });
+}
+
+export async function toggleTgwsAutostart(enabled: boolean) {
+  try {
+    await invoke("set_tgws_autostart", { enabled });
+    await refreshInternal(true);
+  } catch (error) {
+    toast("error", String(error));
+  }
+}
+
+export async function copyTgwsLink() {
+  if (!tgwsLink.value) return;
+  try {
+    await invoke("copy_to_clipboard", { text: tgwsLink.value });
+    toast("success", "Ссылка скопирована.");
+  } catch (error) {
+    toast("error", String(error));
+  }
+}
+
+export async function openTgwsInTelegram() {
+  if (!tgwsLink.value) return;
+  try {
+    await invoke("open_telegram_link", { url: tgwsLink.value });
+  } catch (error) {
+    toast("error", String(error));
+  }
+}
+
+export async function openTgwsLog() {
+  try {
+    await invoke("open_tgws_log");
   } catch (error) {
     toast("error", String(error));
   }

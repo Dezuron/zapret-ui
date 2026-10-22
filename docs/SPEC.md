@@ -113,8 +113,9 @@
 
 | Путь | Назначение |
 |---|---|
-| `%LOCALAPPDATA%\zapret-ui\config.json` | Конфиг: `last_strategy`, `autostart`, `check_updates`, `game_filter`, `flashscore_bypass`, `runtime_version`, `bench_budget`, `bench_auto_apply`, `apply_auto_rollback` |
+| `%LOCALAPPDATA%\zapret-ui\config.json` | Конфиг: `last_strategy`, `autostart`, `check_updates`, `game_filter`, `flashscore_bypass`, `runtime_version`, `bench_budget`, `bench_auto_apply`, `apply_auto_rollback`, `tgws` |
 | `%LOCALAPPDATA%\zapret-ui\runtime\` | Распакованный zapret (bin/, lists/, utils/, *.bat, service.bat) |
+| `%LOCALAPPDATA%\zapret-ui\tgws\` | Headless Telegram-прокси: `tgws-cli.exe`, `tgws.log` (ротация 5 МБ × 1) |
 | `%LOCALAPPDATA%\zapret-ui\tmp\` | Временные файлы обновлений (`runtime_*`) |
 | `%LOCALAPPDATA%\zapret-ui\bench.json` | История проверок (последние 20 прогонов) |
 | `%LOCALAPPDATA%\zapret-ui\bench_state.json` | Маркер незавершённого прогона для восстановления после падения |
@@ -214,6 +215,12 @@
 | `apply_candidate` | применить стратегию + отложенная перепроверка через 60 с с автооткатом |
 | `delete_generated` | удалить экспериментальную стратегию |
 | `get_last_bench` | последний прогон (из памяти или `bench.json`) |
+| `get_tgws_status` / `start_tgws` / `stop_tgws` / `restart_tgws` | состояние и управление Telegram-прокси (см. 6.11) |
+| `get_tgws_link` / `regenerate_tgws_secret` | `tg://proxy`-ссылка и смена ключа (с перезапуском) |
+| `get_tgws_logs` / `open_tgws_log` | кольцевой буфер логов (300 строк) и файл лога |
+| `check_tgws_update` / `install_tgws_update` / `dismiss_tgws_update` | обновление бинарника прокси из `tgws-v*` релизов |
+| `set_tgws_autostart` / `set_tgws_host` / `set_tgws_port` / `set_tgws_secret` | настройки прокси с валидацией и перезапуском |
+| `copy_to_clipboard` / `open_telegram_link` | буфер обмена (Win32) и открытие `tg://proxy`-ссылки |
 
 ### 6.7 `lib.rs` — трей, single-instance, autostart-флаг
 
@@ -304,6 +311,64 @@
 - **Ограничения:** живут только на Windows (нужен `curl.exe` и WinDivert); проверка
   TCP/TLS не показывает голосовой Discord (UDP) и QUIC; прогон прерывает обход
   на 2–5 минут; результаты — снимок на текущий момент и провайдера.
+
+---
+
+## 6.11 Telegram WS-прокси
+
+**Цель:** локальный MTProto-over-WebSocket прокси для Telegram Desktop, управляемый из
+приложения, без отдельной трей-программы.
+
+- **Источник:** [Flowseal/tg-ws-proxy](https://github.com/Flowseal/tg-ws-proxy) (MIT). Upstream
+  для Windows — трей-GUI; у него **нет** `--host/--port/--secret`, параметры берутся из
+  `%APPDATA%\TgWsProxy\config.json`. Поэтому в нашем репозитории собирается headless-бинарник
+  из **штатного консольного входа** upstream (`proxy.tg_ws_proxy:main`): `scripts/tgws/entry.py`
+  (12 строк) + `scripts/tgws/tgws-cli.spec`. GUI-зависимости (`pystray`, `customtkinter`,
+  `Pillow`, `pyperclip`, `psutil`) исключены из бандла.
+- **Сборка:** `.github/workflows/tgws-build.yml` по тегу `tgws-v<upstream>-<revision>`
+  (например `tgws-v1.11.2-1`): клонирует upstream на тег `v1.11.2`, ставит его и PyInstaller,
+  собирает `tgws-cli-windows-x64.exe` (~14 МБ), проверяет `--help` **и реальный bind порта**,
+  публикует Release с этим ассетом и `SHA256SUMS.txt`. Тег-неймспейс отдельный, чтобы не
+  смешиваться с релизами приложения.
+- **Хранение:** `%LOCALAPPDATA%\zapret-ui\tgws\tgws-cli.exe` — вне `runtime\`, иначе
+  обновление zapret снесло бы прокси. Лог `tgws.log` с ротацией 5 МБ × 1.
+- **Конфиг** (`config.json`, секция `tgws`, все поля `#[serde(default)]`):
+  `autostart` (по умолчанию `true`), `host` (`127.0.0.1`), `port` (1443), `secret` (32 hex,
+  генерируется лениво при первом обращении), `dc_ip`, `buf_kb`, `pool_size`, `cfproxy`,
+  `h2`, `cfproxy_user_domain`, `fake_tls_domain`, `verbose`, `installed_version`,
+  `dismissed_update_tag`. В UI редактируются только host/port/secret; остальное — руками.
+- **Аргументы процесса:** `--host --port --secret --dc-ip… --buf-kb --pool-size [-v]
+  [--no-cfproxy] [--no-h2] [--cfproxy-domain] [--fake-tls-domain]`. Секрет виден в списке
+  процессов (как и у upstream) — принимаем: тот же пользователь, локальный процесс.
+- **Супервизор** (`src-tauri/src/tgws.rs`): мьютекс на start/stop/restart; пред-проверка
+  порта (`TcpListener::bind`), при занятости — `taskkill /F /T /IM tgws-cli.exe` (только
+  свой образ) и повторная проверка, иначе понятная ошибка; spawn с `CREATE_NO_WINDOW`;
+  stdout+stderr читаются в кольцевой буфер (300 строк) и файл, строки с секретом маскируются;
+  через 700 мс проверяется, что процесс жив → `running`; стоп — `taskkill /F /T /PID` и
+  ожидание exit до 3 с.
+- **Статусы:** `stopped | starting | running | stopping | error | not_installed`; эмитятся
+  событием `tgws-status`, строки лога — `tgws-log`.
+- **Ссылка:** `tg://proxy?server=<host>&port=<port>&secret=dd<secret>`; если в конфиге задан
+  `fake_tls_domain`, upstream ждёт `ee<secret><hex(домена)>`, и приложение строит именно такую
+  ссылку (`link_for`). Для `0.0.0.0`/`::` в ссылке подставляется `127.0.0.1`; IPv6 берётся
+  в скобки.
+- **Обновления:** `GET /repos/Dezuron/zapret-ui/releases?per_page=30`, фильтр тегов
+  `tgws-v*`, максимальная версия, ассет `tgws-cli-windows-x64.exe`, `digest` обязателен.
+  Кэш 12 ч (память + `tgws_update_cache.json` в корне данных приложения), «Позже» пишет
+  `dismissed_update_tag` (скрывает только пассивный баннер; в «Настройках» обновление остаётся
+  доступным). Ссылку, версию и digest для установки backend берёт из своего кэша релиза, а не
+  из webview. Установка: стоп → скачать → SHA-256 → `taskkill` образа (снять write-lock) →
+  запись `tgws-cli.exe.new` → замена с бэкапом `.old` и восстановлением при следующем старте →
+  сохранить версию → перезапуск, если работал.
+- **Жизненный цикл:** автостарт в `setup`, если `autostart` и бинарник есть; закрытие окна
+  (`X`) прячет в трей и прокси продолжает работать; выход из приложения
+  (`RunEvent::ExitRequested`/`Exit`) останавливает прокси и убивает возможного сироту.
+- **UI:** страница «Telegram» (`src/pages/TelegramPage.vue`) — статус и тумблер, баннер
+  обновления, ссылка с копированием/открытием/сменой ключа, host/port/secret, тумблер
+  автозапуска, предупреждение при не-loopback хосте, сворачиваемые логи. Карточка Telegram
+  на главной показывает состояние и адрес.
+- **Проверка:** unit-тесты в `tgws.rs` (argv, ссылка, валидация, сравнение версий, выбор
+  релиза, маскирование секрета) и `src/lib/tgws.test.ts` (подписи/тон/адрес/хвост лога).
 
 ---
 

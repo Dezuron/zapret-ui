@@ -65,6 +65,54 @@ pub fn open_path(path: &std::path::Path) -> Result<(), String> {
     }
 }
 
+/// Copies UTF-16 text to the Windows clipboard.
+///
+/// Implemented directly instead of adding a clipboard plugin: the only thing
+/// the app copies is a `tg://` link, and this keeps the dependency surface (and
+/// the bundled JS) unchanged.
+pub fn copy_to_clipboard(text: &str) -> Result<(), String> {
+    use windows_sys::Win32::Foundation::GlobalFree;
+    use windows_sys::Win32::System::DataExchange::{
+        CloseClipboard, EmptyClipboard, OpenClipboard, SetClipboardData,
+    };
+    use windows_sys::Win32::System::Memory::{
+        GlobalAlloc, GlobalLock, GlobalUnlock, GMEM_MOVEABLE,
+    };
+    use windows_sys::Win32::System::Ole::CF_UNICODETEXT;
+
+    let wide: Vec<u16> = text.encode_utf16().chain(std::iter::once(0)).collect();
+    let size = wide.len() * std::mem::size_of::<u16>();
+
+    unsafe {
+        if OpenClipboard(std::ptr::null_mut()) == 0 {
+            return Err("Буфер обмена занят другим приложением.".into());
+        }
+        let _ = EmptyClipboard();
+        let handle = GlobalAlloc(GMEM_MOVEABLE, size);
+        if handle.is_null() {
+            let _ = CloseClipboard();
+            return Err("Не удалось выделить память для буфера обмена.".into());
+        }
+        let target = GlobalLock(handle) as *mut u16;
+        if target.is_null() {
+            let _ = GlobalFree(handle);
+            let _ = CloseClipboard();
+            return Err("Не удалось записать в буфер обмена.".into());
+        }
+        std::ptr::copy_nonoverlapping(wide.as_ptr(), target, wide.len());
+        let _ = GlobalUnlock(handle);
+        // On success the clipboard owns `handle`; freeing it here would corrupt
+        // the clipboard contents.
+        if SetClipboardData(CF_UNICODETEXT as u32, handle).is_null() {
+            let _ = GlobalFree(handle);
+            let _ = CloseClipboard();
+            return Err("Не удалось записать в буфер обмена.".into());
+        }
+        let _ = CloseClipboard();
+    }
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

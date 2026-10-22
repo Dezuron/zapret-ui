@@ -1,10 +1,13 @@
 <script setup lang="ts">
+import { computed, onMounted } from "vue";
 import Panel from "./Panel.vue";
 import Toggle from "./Toggle.vue";
 import MarkdownBody from "./MarkdownBody.vue";
 import { formatBytes } from "../lib/labels";
+import { tgwsVersionLabel } from "../lib/tgws";
 import {
   applyAppUpdate,
+  applyTgwsUpdate,
   applyUpdate,
   appUpdate,
   appUpdateProgress,
@@ -12,6 +15,7 @@ import {
   benchRunning,
   busy,
   checkAppUpdate,
+  checkTgwsUpdate,
   checkUpdate,
   checkingAppUpdate,
   checkingUpdate,
@@ -25,6 +29,11 @@ import {
   setGameFilter,
   setTheme,
   status,
+  tgwsBusy,
+  tgwsChecking,
+  tgwsProgress,
+  tgwsStatus,
+  tgwsUpdate,
   toggleAutostart,
   toggleCheckUpdates,
   toggleFlashscore,
@@ -37,6 +46,19 @@ const themes = [
   { value: "gray" as const, label: "Серая" },
   { value: "light" as const, label: "Светлая" },
 ];
+
+const tgwsVersion = computed(() =>
+  tgwsVersionLabel(
+    config.value?.tgws.installed_version || tgwsStatus.value?.installed_version,
+    tgwsStatus.value?.binary_present,
+  ),
+);
+
+onMounted(() => {
+  // Cached check: the Telegram page and this page share the same 12h cache, so
+  // opening Settings never adds a GitHub round-trip on its own.
+  void checkTgwsUpdate(true, false);
+});
 </script>
 
 <template>
@@ -111,6 +133,34 @@ const themes = [
         {{ checkingUpdate ? "Проверка…" : "Проверить обновления flowseal-zapret" }}
       </button>
       <div v-if="updateProgress" class="muted">{{ updateProgress }}</div>
+
+      <h4>Telegram WS-прокси</h4>
+      <div class="version-row">
+        <div class="version-box">
+          <span class="field-label">Версия</span>
+          <span class="field-value">{{ tgwsVersion }}</span>
+        </div>
+        <span class="arrow" aria-hidden="true">→</span>
+        <div class="version-box" :class="{ available: tgwsUpdate?.has_update }">
+          <span class="field-label">Доступно</span>
+          <span class="field-value">
+            {{ tgwsUpdate?.has_update && tgwsUpdate.latest ? tgwsUpdate.latest : tgwsVersion }}
+          </span>
+        </div>
+      </div>
+
+      <button
+        v-if="tgwsUpdate?.has_update"
+        class="btn primary"
+        :disabled="tgwsBusy"
+        @click="applyTgwsUpdate"
+      >
+        Обновить{{ tgwsUpdate.asset_size ? ` (${formatBytes(tgwsUpdate.asset_size)})` : "" }}
+      </button>
+      <button v-else class="btn" :disabled="tgwsChecking" @click="checkTgwsUpdate(false, true)">
+        {{ tgwsChecking ? "Проверка…" : "Проверить обновление прокси" }}
+      </button>
+      <div v-if="tgwsProgress" class="muted">{{ tgwsProgress }}</div>
     </section>
 
     <section class="section">

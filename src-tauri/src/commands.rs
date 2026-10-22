@@ -23,10 +23,12 @@ use tauri::State;
 mod benchmark;
 mod settings;
 mod strategies;
+mod tgws;
 mod updates;
 pub use benchmark::*;
 pub use settings::*;
 pub use strategies::*;
+pub use tgws::*;
 pub use updates::*;
 
 /// Timeout for one host/protocol probe. Four seconds per protocol is enough for a
@@ -62,6 +64,15 @@ pub struct AppStatus {
 }
 
 #[derive(Serialize)]
+pub struct TgwsConfigView {
+    pub autostart: bool,
+    pub host: String,
+    pub port: u16,
+    pub secret: String,
+    pub installed_version: String,
+}
+
+#[derive(Serialize)]
 pub struct ConfigView {
     pub autostart: bool,
     pub check_updates: bool,
@@ -73,6 +84,7 @@ pub struct ConfigView {
     pub theme: String,
     pub bench_budget: usize,
     pub bench_auto_apply: bool,
+    pub tgws: TgwsConfigView,
 }
 
 /// Result of an on-demand check: either the current strategy (service running)
@@ -193,6 +205,13 @@ pub fn get_config(state: State<'_, AppState>) -> AppResult<ConfigView> {
         theme: cfg.theme.clone(),
         bench_budget: cfg.bench_budget,
         bench_auto_apply: cfg.bench_auto_apply,
+        tgws: TgwsConfigView {
+            autostart: cfg.tgws.autostart,
+            host: cfg.tgws.host.clone(),
+            port: cfg.tgws.port,
+            secret: cfg.tgws.secret.clone(),
+            installed_version: cfg.tgws.installed_version.clone(),
+        },
     })
 }
 

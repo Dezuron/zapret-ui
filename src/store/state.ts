@@ -7,10 +7,13 @@ import type {
   CandidateResult,
   ConfigView,
   QuickCheck,
+  TgwsStatus,
+  TgwsUpdateInfo,
   UpdateInfo,
   WhatsNew,
 } from "../types";
 import { formatTimestamp } from "../lib/labels";
+import { tgwsStateLabel } from "../lib/tgws";
 
 export type SortMode = "name" | "score" | "latency";
 
@@ -37,9 +40,22 @@ export const includeGenerated = ref(false);
 export const budget = ref(40);
 export const sortMode = ref<SortMode>("score");
 
+export const tgwsStatus = ref<TgwsStatus | null>(null);
+export const tgwsUpdate = ref<TgwsUpdateInfo | null>(null);
+export const tgwsLogs = ref<string[]>([]);
+export const tgwsLink = ref("");
+export const tgwsBusy = ref(false);
+export const tgwsChecking = ref(false);
+export const tgwsProgress = ref<string | null>(null);
+
 export const running = computed(() => status.value?.running ?? false);
 export const runtimeReady = computed(() => status.value?.runtime_valid ?? false);
 export const runtimePath = computed(() => config.value?.runtime_path ?? "");
+export const tgwsRunning = computed(() => tgwsStatus.value?.state === "running");
+export const tgwsHasUpdate = computed(
+  () => !!tgwsUpdate.value?.has_update && !tgwsUpdate.value.dismissed,
+);
+export const tgwsStateText = computed(() => tgwsStateLabel(tgwsStatus.value?.state));
 export const showSetupWizard = computed(
   () => !!status.value && !runtimeReady.value && !wizardDismissed.value,
 );

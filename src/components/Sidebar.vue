@@ -17,7 +17,7 @@ const collapsed = ref(false);
 const items = [
   { to: "/", label: "Главная", icon: LayoutDashboard },
   { to: "/zapret", label: "Zapret", icon: ShieldCheck },
-  { to: "/telegram", label: "Telegram", icon: Send, soon: true },
+  { to: "/telegram", label: "Telegram", icon: Send },
   { to: "/settings", label: "Настройки", icon: Settings2 },
 ];
 </script>
@@ -43,7 +43,6 @@ const items = [
       >
         <component :is="item.icon" :size="18" :stroke-width="1.9" />
         <span v-if="!collapsed" class="nav-label">{{ item.label }}</span>
-        <span v-if="item.soon && !collapsed" class="nav-badge">скоро</span>
       </RouterLink>
     </nav>
 

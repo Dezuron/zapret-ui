@@ -22,12 +22,19 @@ import {
   checkUpdate,
   checkingAppUpdate,
   checkingUpdate,
+  config,
   running,
   runtimeReady,
   status,
+  tgwsBusy,
+  tgwsRunning,
+  tgwsStateText,
+  tgwsStatus,
   toggleStart,
+  toggleTgws,
   updateInfo,
 } from "../store";
+import { tgwsEndpoint, tgwsVersionLabel } from "../lib/tgws";
 
 const router = useRouter();
 
@@ -45,6 +52,15 @@ const bestScore = computed(() => {
 const appHasUpdate = computed(() => !!appUpdate.value?.available);
 const zapretHasUpdate = computed(() => !!updateInfo.value?.update_available);
 const checkingAllUpdates = computed(() => checkingAppUpdate.value || checkingUpdate.value);
+const telegramEndpoint = computed(() =>
+  tgwsEndpoint(config.value?.tgws.host, config.value?.tgws.port),
+);
+const telegramVersion = computed(() =>
+  tgwsVersionLabel(
+    config.value?.tgws.installed_version || tgwsStatus.value?.installed_version,
+    tgwsStatus.value?.binary_present,
+  ),
+);
 
 async function checkAllUpdates() {
   if (checkingAllUpdates.value || benchRunning.value) return;
@@ -100,20 +116,38 @@ async function checkAllUpdates() {
         </CardContent>
       </Card>
 
-      <Card class="power-card power-card-muted">
+      <Card class="power-card">
         <CardHeader class="power-head">
           <div class="power-icon telegram"><Send :size="19" /></div>
           <div class="power-heading">
             <CardTitle>Telegram</CardTitle>
-            <CardDescription>WS-прокси · скоро</CardDescription>
+            <CardDescription>{{ tgwsStateText }}</CardDescription>
           </div>
-          <Switch :model-value="false" disabled aria-label="Telegram WS-прокси скоро" />
+          <Switch
+            :model-value="tgwsRunning"
+            :disabled="tgwsBusy"
+            aria-label="Включить или выключить Telegram WS-прокси"
+            @update:model-value="toggleTgws"
+          />
         </CardHeader>
         <CardContent class="power-content">
-          <p class="muted power-placeholder">
-            Управление встроенным Telegram WS-прокси появится здесь: подключение, ключ, порт и
-            собственный Worker.
-          </p>
+          <div class="power-meta">
+            <span>Адрес</span>
+            <strong>{{ telegramEndpoint }}</strong>
+          </div>
+          <div class="power-meta">
+            <span>Версия</span>
+            <strong>{{ telegramVersion }}</strong>
+          </div>
+          <Button
+            class="power-action"
+            variant="outline"
+            size="sm"
+            @click="router.push('/telegram')"
+          >
+            Подключение и ключ
+            <ArrowUpRight :size="13" />
+          </Button>
         </CardContent>
       </Card>
     </div>
