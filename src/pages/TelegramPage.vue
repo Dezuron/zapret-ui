@@ -131,7 +131,7 @@ async function commitSecret() {
         <div class="tgws-hero-text">
           <span class="eyebrow">Telegram</span>
           <CardTitle>WS-прокси</CardTitle>
-          <CardDescription>{{ tgwsStateText }} · {{ endpointLabel }}</CardDescription>
+          <CardDescription>{{ tgwsStateText }}</CardDescription>
         </div>
         <div class="tgws-hero-controls">
           <span class="tgws-dot" :class="`is-${tone}`" aria-hidden="true"></span>

@@ -93,7 +93,7 @@ jobs:
           )
           Start-Sleep -Seconds 5
           if ($proxy.HasExited) { throw "Proxy exited immediately with code $($proxy.ExitCode)" }
-          $listening = Get-NetTCPConnection -LocalPort 18777 -State Listen -ErrorAction SilentlyContinue
+          $listening = netstat -ano | Select-String ':18777\s'
           Stop-Process -Id $proxy.Id -Force
           if (-not $listening) { throw "Proxy did not listen on 127.0.0.1:18777" }
 
