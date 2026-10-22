@@ -73,6 +73,9 @@ pub struct TgwsConfig {
     pub installed_version: String,
     /// Release tag the user dismissed with "Позже".
     pub dismissed_update_tag: String,
+    /// One-time migration flag: the secret/port may be inherited from a
+    /// standalone TgWsProxy install, so the Telegram entry keeps working.
+    pub secret_migrated: bool,
 }
 
 impl Default for TgwsConfig {
@@ -92,6 +95,7 @@ impl Default for TgwsConfig {
             verbose: false,
             installed_version: String::new(),
             dismissed_update_tag: String::new(),
+            secret_migrated: false,
         }
     }
 }
