@@ -7,6 +7,7 @@ import {
   showWhatsNew,
   status,
   statusText,
+  tgwsStatus,
   whatsNew,
   wizardDismissed,
 } from "./state";
@@ -27,6 +28,7 @@ function makeStatus(overrides: Partial<AppStatus> = {}): AppStatus {
 describe("store state", () => {
   beforeEach(() => {
     status.value = null;
+    tgwsStatus.value = null;
     wizardDismissed.value = false;
     whatsNew.value = null;
   });
@@ -49,7 +51,40 @@ describe("store state", () => {
     });
     expect(runtimeReady.value).toBe(true);
     expect(showSetupWizard.value).toBe(false);
-    expect(statusText.value).toBe("Обход работает");
+    expect(statusText.value).toBe("Zapret работает");
+  });
+
+  it("reports both services when the bypass and Telegram run", () => {
+    status.value = makeStatus({ runtime_valid: true, running: true });
+    tgwsStatus.value = {
+      state: "running",
+      pid: 42,
+      last_error: null,
+      installed_version: "1.11.2-1",
+      binary_present: true,
+      port_conflict: false,
+      client_connections_total: 1,
+    };
+    expect(statusText.value).toBe("Zapret и Telegram работают");
+  });
+
+  it("reports Telegram alone", () => {
+    status.value = makeStatus({ runtime_valid: true, running: false });
+    tgwsStatus.value = {
+      state: "running",
+      pid: 42,
+      last_error: null,
+      installed_version: "1.11.2-1",
+      binary_present: true,
+      port_conflict: false,
+      client_connections_total: 1,
+    };
+    expect(statusText.value).toBe("Telegram-прокси работает");
+  });
+
+  it("reports everything off", () => {
+    status.value = makeStatus({ runtime_valid: true, running: false });
+    expect(statusText.value).toBe("Zapret и Telegram выключены");
   });
 
   it("shows What's new only after the setup wizard", () => {

@@ -65,16 +65,29 @@ export const appVersion = computed(() => status.value?.app_version ?? "");
 
 export const statusText = computed(() => {
   if (!status.value) return "Загрузка…";
-  if (!status.value.runtime_valid) return "flowseal-zapret не установлен";
   if (benchRunning.value) return "Идёт проверка стратегий";
-  return running.value ? "Обход работает" : "Обход остановлен";
+
+  const bypassActive = status.value.runtime_valid && running.value;
+  const telegramActive = tgwsRunning.value;
+
+  if (bypassActive && telegramActive) return "Zapret и Telegram работают";
+  if (bypassActive) return "Zapret работает";
+  if (telegramActive) {
+    return status.value.runtime_valid
+      ? "Telegram-прокси работает"
+      : "Telegram-прокси работает · zapret не установлен";
+  }
+  if (!status.value.runtime_valid) return "flowseal-zapret не установлен";
+  return "Zapret и Telegram выключены";
 });
 
 export const statusTone = computed<"ok" | "idle" | "danger">(() => {
   if (!status.value) return "idle";
-  if (!status.value.runtime_valid) return "danger";
   if (benchRunning.value) return "idle";
-  return running.value ? "ok" : "idle";
+
+  const bypassActive = status.value.runtime_valid && running.value;
+  if (bypassActive || tgwsRunning.value) return "ok";
+  return status.value.runtime_valid ? "idle" : "danger";
 });
 
 const benchByName = computed(() => {

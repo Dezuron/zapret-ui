@@ -7,7 +7,6 @@ import {
   ExternalLink,
   RefreshCw,
   RotateCw,
-  ScrollText,
   Send,
 } from "lucide-vue-next";
 import Card from "../components/ui/card/Card.vue";
@@ -33,7 +32,6 @@ import {
   copyTgwsLink,
   dismissTgwsUpdate,
   openTgwsInTelegram,
-  openTgwsLog,
   refreshTgws,
   regenerateTgwsSecret,
   restartTgws,
@@ -175,10 +173,6 @@ async function commitSecret() {
           >
             <RotateCw :size="14" />
             Перезапустить
-          </Button>
-          <Button variant="ghost" size="sm" @click="openTgwsLog">
-            <ScrollText :size="14" />
-            Открыть лог
           </Button>
           <Button
             variant="ghost"
@@ -430,6 +424,7 @@ async function commitSecret() {
 
 .tgws-hero-head {
   display: flex;
+  flex-direction: row;
   align-items: center;
   gap: 12px;
 }

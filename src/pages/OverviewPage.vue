@@ -45,7 +45,7 @@ const router = useRouter();
 
 const zapretState = computed(() => {
   if (!runtimeReady.value) return "Не установлен";
-  return running.value ? "Обход включён" : "Обход выключен";
+  return running.value ? "Включён" : "Выключен";
 });
 
 const bestScore = computed(() => {
