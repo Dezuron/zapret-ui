@@ -104,12 +104,16 @@
 }
 
 /* ---------- Reset / base ---------- */
-*,
-*::before,
-*::after {
-  box-sizing: border-box;
-  margin: 0;
-  padding: 0;
+/* Must live in `@layer base`: unlayered `padding: 0` overrides Tailwind
+   utilities such as CardHeader's `p-4`, which strips all card padding. */
+@layer base {
+  *,
+  *::before,
+  *::after {
+    box-sizing: border-box;
+    margin: 0;
+    padding: 0;
+  }
 }
 
 html,
